@@ -343,3 +343,5 @@ tool (
 	github.com/golangci/golangci-lint/v2/cmd/golangci-lint
 	golang.org/x/vuln/cmd/govulncheck
 )
+
+replace github.com/gosom/scrapemate => ./third_party/scrapemate

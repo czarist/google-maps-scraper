@@ -3,7 +3,10 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/gosom/scrapemate"
 )
 
 var jobs []Job
@@ -112,6 +115,13 @@ func (d *JobData) Validate() error {
 
 	if d.FastMode && (d.Lat == "" || d.Lon == "") {
 		return errors.New("missing geo coordinates")
+	}
+
+	// Reject unsupported proxies here: the scraper panics on them at runtime.
+	for _, p := range d.Proxies {
+		if _, err := scrapemate.NewProxy(p); err != nil {
+			return fmt.Errorf("invalid proxy %q: %w (supported: http, https, socks5)", p, err)
+		}
 	}
 
 	return nil
