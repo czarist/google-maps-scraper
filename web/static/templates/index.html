@@ -4,158 +4,416 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Google Maps Scraper</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <link rel="stylesheet" href="/static/css/main.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body>
-    <div class="app-container">
-        <header>
-            <h1>Google Maps Scraper</h1>
-            <nav>
-                <a href="/api/docs" target="_blank" rel="noopener noreferrer">API Documentation</a>
-            </nav>
-            <div class="github-section">
-                <p>If you find this tool useful, please consider starring our repository: </p>
-                <a href="https://github.com/gosom/google-maps-scraper" class="github-button">
-                <svg height="16" width="16" viewBox="0 0 16 16">
+    <a class="skip-link" href="#name">Skip to the form</a>
+
+    <header class="topbar">
+        <div class="brand">
+            <svg class="brand-pin" width="22" height="28" viewBox="0 0 22 28" aria-hidden="true">
+                <path d="M11 0C4.9 0 0 4.8 0 10.8 0 18.9 11 28 11 28s11-9.1 11-17.2C22 4.8 17.1 0 11 0Z"/>
+                <circle cx="11" cy="10.5" r="4" fill="#fff"/>
+            </svg>
+            <span class="brand-name">Google Maps Scraper</span>
+        </div>
+        <nav class="topnav" aria-label="Project links">
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer">API documentation</a>
+            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">
+                <svg height="14" width="14" viewBox="0 0 16 16" aria-hidden="true">
                     <path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/>
-                  </svg>
-                  Star on GitHub
-                </a>
-            </div>
-            <div id="sponsor-section" class="sponsor-section">
-    <button class="sponsor-close" onclick="hideSponsor()">
-        ×
-    </button>
-    <p class="sponsor-text">Support the ongoing maintenance and development of this project by becoming a sponsor. Your contribution helps ensure the tool's continued improvement and reliability.</p>
-    <a href="https://github.com/sponsors/gosom" class="sponsor-button" target="_blank" rel="noopener noreferrer">
-        <svg height="16" width="16" viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg">
-            <path fill-rule="evenodd" clip-rule="evenodd" d="M4.25 2.5C4.25 1.83696 4.67143 1.25 5.25 1.25C5.82857 1.25 6.25 1.83696 6.25 2.5C6.25 3.16304 5.82857 3.75 5.25 3.75C4.67143 3.75 4.25 3.16304 4.25 2.5ZM2.5 3.75C1.92143 3.75 1.5 3.16304 1.5 2.5C1.5 1.83696 1.92143 1.25 2.5 1.25C3.07857 1.25 3.5 1.83696 3.5 2.5C3.5 3.16304 3.07857 3.75 2.5 3.75ZM8 1.25C7.42143 1.25 7 1.83696 7 2.5C7 3.16304 7.42143 3.75 8 3.75C8.57857 3.75 9 3.16304 9 2.5C9 1.83696 8.57857 1.25 8 1.25ZM10.75 2.5C10.75 1.83696 11.1714 1.25 11.75 1.25C12.3286 1.25 12.75 1.83696 12.75 2.5C12.75 3.16304 12.3286 3.75 11.75 3.75C11.1714 3.75 10.75 3.16304 10.75 2.5ZM14.5 1.25C13.9214 1.25 13.5 1.83696 13.5 2.5C13.5 3.16304 13.9214 3.75 14.5 3.75C15.0786 3.75 15.5 3.16304 15.5 2.5C15.5 1.83696 15.0786 1.25 14.5 1.25ZM1.25 5.25C1.25 4.67143 1.83696 4.25 2.5 4.25C3.16304 4.25 3.75 4.67143 3.75 5.25C3.75 5.82857 3.16304 6.25 2.5 6.25C1.83696 6.25 1.25 5.82857 1.25 5.25ZM5.25 4.25C4.67143 4.25 4.25 4.67143 4.25 5.25C4.25 5.82857 4.67143 6.25 5.25 6.25C5.82857 6.25 6.25 5.82857 6.25 5.25C6.25 4.67143 5.82857 4.25 5.25 4.25ZM7 5.25C7 4.67143 7.42143 4.25 8 4.25C8.57857 4.25 9 4.67143 9 5.25C9 5.82857 8.57857 6.25 8 6.25C7.42143 6.25 7 5.82857 7 5.25ZM11.75 4.25C11.1714 4.25 10.75 4.67143 10.75 5.25C10.75 5.82857 11.1714 6.25 11.75 6.25C12.3286 6.25 12.75 5.82857 12.75 5.25C12.75 4.67143 12.3286 4.25 11.75 4.25ZM13.5 5.25C13.5 4.67143 13.9214 4.25 14.5 4.25C15.0786 4.25 15.5 4.67143 15.5 5.25C15.5 5.82857 15.0786 6.25 14.5 6.25C13.9214 6.25 13.5 5.82857 13.5 5.25ZM2.5 7.25C1.83696 7.25 1.25 7.67143 1.25 8.25C1.25 8.82857 1.83696 9.25 2.5 9.25C3.16304 9.25 3.75 8.82857 3.75 8.25C3.75 7.67143 3.16304 7.25 2.5 7.25ZM4.25 8.25C4.25 7.67143 4.67143 7.25 5.25 7.25C5.82857 7.25 6.25 7.67143 6.25 8.25C6.25 8.82857 5.82857 9.25 5.25 9.25C4.67143 9.25 4.25 8.82857 4.25 8.25ZM8 7.25C7.42143 7.25 7 7.67143 7 8.25C7 8.82857 7.42143 9.25 8 9.25C8.57857 9.25 9 8.82857 9 8.25C9 7.67143 8.57857 7.25 8 7.25ZM10.75 8.25C10.75 7.67143 11.1714 7.25 11.75 7.25C12.3286 7.25 12.75 7.67143 12.75 8.25C12.75 8.82857 12.3286 9.25 11.75 9.25C11.1714 9.25 10.75 8.82857 10.75 8.25ZM14.5 7.25C13.9214 7.25 13.5 7.67143 13.5 8.25C13.5 8.82857 13.9214 9.25 14.5 9.25C15.0786 9.25 15.5 8.82857 15.5 8.25C15.5 7.67143 15.0786 7.25 14.5 7.25Z" fill="currentColor"/>
-        </svg>
-        Sponsor on GitHub
-    </a>
-</div>
+                </svg>
+                Star on GitHub
+            </a>
+        </nav>
+    </header>
 
-        </header>
-        <main>
-            <div class="sidebar">
-                <div id="error-container" class="error-message"></div>
-                <form 
-                    hx-post="/scrape" 
-                    hx-target="#job-tbody"
-                    hx-swap="outerHTML"
-                    hx-indicator="#spinner"
-                    hx-on::before-request="document.getElementById('error-container').innerHTML = ''"
-                    hx-on::after-request="if(!event.detail.successful) document.getElementById('error-container').innerHTML = event.detail.xhr.responseText"
-                >
-                    
-                    <fieldset>
-                        <legend>Job Details</legend>
-                        <div class="form-group">
-                            <label for="name">Job Name:</label>
-                            <input type="text" id="name" name="name" value="{{.Name}}">
-                        </div>
-                        <div class="form-group">
-                            <label for="keywords">Keywords:</label>
-                            <textarea id="keywords" name="keywords" rows="10">{{ .KeywordsString }}</textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="lang">Language:</label>
-                            <input type="text" id="lang" name="lang" value="{{.Language}}">
-                        </div>
-                    </fieldset>
-                    
-                    <details class="expandable-section">
-                        <summary>Location Settings</summary>
+    <main class="layout">
+        <section class="panel panel-form" aria-labelledby="form-title">
+            <h1 id="form-title">New job</h1>
+            <p class="lede">Each job searches Google Maps and builds a CSV of the businesses it finds.</p>
+
+            <form id="scrape-form"
+                  hx-post="/scrape"
+                  hx-target="#job-tbody"
+                  hx-swap="outerHTML"
+                  novalidate>
+
+                <div class="field">
+                    <label for="name">Job name</label>
+                    <input type="text" id="name" name="name" value="{{.Name}}"
+                           autocomplete="off" required
+                           placeholder="Coffee shops downtown">
+                </div>
+
+                <div class="field">
+                    <div class="field-head">
+                        <label for="keywords">Search queries</label>
+                        <span class="query-count" id="query-count">0 queries</span>
+                    </div>
+                    <p class="hint" id="keywords-hint">Each line is a separate Google Maps search. Write what you are looking for and where.</p>
+                    <div class="query-editor">
+                        <div class="query-gutter" id="query-gutter" aria-hidden="true">1</div>
+                        <textarea id="keywords" name="keywords" rows="6" wrap="off" required
+                                  spellcheck="false"
+                                  aria-describedby="keywords-hint keywords-examples"
+                                  placeholder="dental clinics in Chicago&#10;coffee shops in Lisbon">{{ .KeywordsString }}</textarea>
+                    </div>
+                    <div class="examples" id="keywords-examples">
+                        <span class="examples-label">Examples:</span>
+                        <button type="button" class="chip" data-example="dental clinics in Chicago">dental clinics in Chicago</button>
+                        <button type="button" class="chip" data-example="coffee shops in Lisbon">coffee shops in Lisbon</button>
+                    </div>
+                </div>
+
+                <div class="field field-narrow">
+                    <label for="lang">Results language</label>
+                    <input type="text" id="lang" name="lang" value="{{.Language}}"
+                           list="lang-options" maxlength="2" required
+                           autocomplete="off" aria-describedby="lang-hint">
+                    <datalist id="lang-options">
+                        <option value="en">English</option>
+                        <option value="es">Spanish</option>
+                        <option value="de">German</option>
+                    </datalist>
+                    <p class="hint" id="lang-hint">Two-letter code, such as en, es or de.</p>
+                </div>
+
+                <details class="advanced" id="advanced">
+                    <summary>
+                        <span>Advanced settings</span>
+                        <span class="advanced-state" id="advanced-state">Defaults</span>
+                    </summary>
+
+                    <div class="advanced-body">
                         <fieldset>
-                            <div class="form-group">
-                                <label for="zoom">Zoom:</label>
-                                <input type="number" id="zoom" name="zoom" value="{{.Zoom}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="latitude">Latitude:</label>
-                                <input type="number" step="0.000000000000001" id="latitude" name="latitude" value="{{.Lat}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="longitude">Longitude:</label>
-                                <input type="number" step="0.000000000000001" id="longitude" name="longitude" value="{{.Lon}}">
+                            <legend>Search area</legend>
+                            <p class="hint">Latitude and longitude are only required in fast mode.</p>
+                            <div class="grid-2">
+                                <div class="field">
+                                    <label for="latitude">Latitude</label>
+                                    <input type="number" step="any" inputmode="decimal" id="latitude" name="latitude" value="{{.Lat}}">
+                                </div>
+                                <div class="field">
+                                    <label for="longitude">Longitude</label>
+                                    <input type="number" step="any" inputmode="decimal" id="longitude" name="longitude" value="{{.Lon}}">
+                                </div>
+                                <div class="field">
+                                    <label for="zoom">Zoom</label>
+                                    <input type="number" step="1" id="zoom" name="zoom" value="{{.Zoom}}">
+                                </div>
+                                <div class="field">
+                                    <label for="radius">Radius in meters</label>
+                                    <input type="number" step="1" id="radius" name="radius" value="{{.Radius}}">
+                                </div>
                             </div>
                         </fieldset>
-                    </details>
-                    
-                    <details class="expandable-section">
-                        <summary>Advanced Options</summary>
+
                         <fieldset>
-                            <div class="form-group">
-                                <label for="fastmode">Fast Mode (BETA):</label>
+                            <legend>Collection</legend>
+                            <div class="grid-2">
+                                <div class="field">
+                                    <label for="depth">Depth</label>
+                                    <input type="number" step="1" min="1" id="depth" name="depth" value="{{.Depth}}" aria-describedby="depth-hint">
+                                    <p class="hint" id="depth-hint">How many times the results list is scrolled.</p>
+                                </div>
+                                <div class="field">
+                                    <label for="maxtime">Max job time</label>
+                                    <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}" aria-describedby="maxtime-hint" autocomplete="off">
+                                    <p class="hint" id="maxtime-hint">For example 10m or 1h. Minimum 3m.</p>
+                                </div>
+                            </div>
+                            <label class="check" for="fastmode">
                                 <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
-                            </div>
-                            <div class="form-group">
-                                    <label for="radius">Radius (BETA):</label>
-                                    <input type="number" id="radius" name="radius" value="{{.Radius}}">
-                            </div>
-                            <div class="form-group">
-                                <label for="depth">Depth:</label>
-                                <input type="number" step="1" id="depth" name="depth" value="{{.Depth}}">
-                            </div>
-                            <div class="form-group checkbox">
+                                <span>
+                                    Fast mode (beta)
+                                    <small>Searches the area set above and returns fewer details per business.</small>
+                                </span>
+                            </label>
+                            <label class="check" for="email">
                                 <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
-                                <label for="email">Fetch Emails</label>
-                            </div>
-                            <div class="form-group">
-                                <label for="maxtime">Max job time:</label>
-                                <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}">
-                            </div>
+                                <span>
+                                    Collect emails
+                                    <small>Visits each business website. Jobs take longer.</small>
+                                </span>
+                            </label>
                         </fieldset>
-                    </details>
-                    <details class="expandable-section">
-                        <summary>Proxies</summary>
-                        <fieldset>
-                            <div class="form-group">
-                                <label for="proxies">Proxies:(one per line)</label>
-                                <p class="text-muted"><small>Examples:<br>
-                                        <p>HTTPS proxy with username/password: https://username:password@myproxy.local:443<p>
-                                        <p>HTTP proxy with username/password: http://username:password@myproxy.local:443<p>
-                                        <p>SOCKS5 proxy without auth: socks5://127.0.0.1:8000</p>
-                                </p>
 
-                                <textarea id="proxies" name="proxies" rows="5">{{.ProxiesString}}</textarea>
+                        <fieldset>
+                            <legend>Proxies</legend>
+                            <div class="field">
+                                <label for="proxies">One proxy per line</label>
+                                <textarea id="proxies" name="proxies" rows="4" wrap="off" spellcheck="false" aria-describedby="proxies-hint"
+                                          placeholder="http://user:pass@host:port&#10;socks5://host:port">{{.ProxiesString}}</textarea>
+                                <p class="hint" id="proxies-hint">Supports http, https and socks5. Leave empty to connect directly.</p>
                             </div>
                         </fieldset>
-                    </details>
-                    
-                    <button type="submit">Start Scraping</button>
-                </form>
+                    </div>
+                </details>
+
+                <div class="submit-row">
+                    <button type="submit" class="btn-primary" id="submit-btn">
+                        <span class="btn-spinner" aria-hidden="true"></span>
+                        <span class="btn-label">Create job</span>
+                    </button>
+                    <span class="hint kbd-hint">or <kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+                </div>
+
+                <div id="error-container" class="notice notice-error" role="alert" tabindex="-1"></div>
+                <div id="form-status" class="notice notice-success" role="status" aria-live="polite"></div>
+            </form>
+        </section>
+
+        <section class="panel panel-jobs" aria-labelledby="jobs-title">
+            <div class="jobs-head">
+                <h2 id="jobs-title">Jobs</h2>
+                <p class="hint">The list refreshes every 10 seconds.</p>
             </div>
-            <div class="content">
-                <div id="spinner" class="spinner"></div>
+            <div class="table-wrap">
                 <table id="job-table">
                     <thead>
                         <tr>
-                            <th>Job ID</th>
-                            <th>Job Name</th>
-                            <th>Job Date</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th scope="col">Job</th>
+                            <th scope="col">Created</th>
+                            <th scope="col">Status</th>
+                            <th scope="col"><span class="visually-hidden">Actions</span></th>
                         </tr>
                     </thead>
                     <tbody id="job-tbody" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
-                        <!-- Job rows will be inserted here by HTMX -->
+                        <tr class="empty-row"><td colspan="4">Loading jobs…</td></tr>
                     </tbody>
                 </table>
-                <div id="pagination-container"></div>
             </div>
-        </main>
-    </div>
+
+            <aside id="sponsor-section" class="sponsor" aria-label="Support the project">
+                <p>This project is maintained through sponsorships. If it helps your work, consider supporting it.</p>
+                <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer">Sponsor on GitHub</a>
+                <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="Dismiss sponsor note">&times;</button>
+            </aside>
+        </section>
+    </main>
 
     <div id="map-modal-container"></div>
+
 <script>
 function hideSponsor() {
-    const sponsorSection = document.getElementById('sponsor-section');
-    if (sponsorSection) {
-        sponsorSection.style.display = 'none';
-    }
+    var el = document.getElementById('sponsor-section');
+    if (el) el.hidden = true;
+    try { localStorage.setItem('gms-sponsor-hidden', '1'); } catch (e) {}
 }
+
+(function () {
+    try {
+        if (localStorage.getItem('gms-sponsor-hidden') === '1') {
+            document.getElementById('sponsor-section').hidden = true;
+        }
+    } catch (e) {}
+
+    var form = document.getElementById('scrape-form');
+    var submitBtn = document.getElementById('submit-btn');
+    var submitLabel = submitBtn.querySelector('.btn-label');
+    var errorBox = document.getElementById('error-container');
+    var statusBox = document.getElementById('form-status');
+    var advanced = document.getElementById('advanced');
+    var advancedState = document.getElementById('advanced-state');
+    var keywords = document.getElementById('keywords');
+    var gutter = document.getElementById('query-gutter');
+    var queryCount = document.getElementById('query-count');
+
+    var advancedFields = ['latitude', 'longitude', 'zoom', 'radius', 'depth', 'maxtime', 'fastmode', 'email', 'proxies'];
+
+    // Server messages (plain text) mapped to the field they refer to.
+    var errorRules = [
+        [/^missing name/i, 'name', 'Give the job a name.'],
+        [/^missing keywords/i, 'keywords', 'Add at least one search query.'],
+        [/^(missing|invalid) lang/i, 'lang', 'Use a two-letter language code, such as en or es.'],
+        [/^max time must be/i, 'maxtime', 'Max job time must be at least 3m.'],
+        [/^(invalid|missing) max time/i, 'maxtime', 'Write the max job time like 10m or 1h.'],
+        [/^invalid zoom/i, 'zoom', 'Zoom must be a whole number, such as 15.'],
+        [/^invalid radius/i, 'radius', 'Radius must be a whole number of meters, such as 10000.'],
+        [/^(invalid|missing) depth/i, 'depth', 'Depth must be a whole number greater than 0.'],
+        [/^missing geo coordinates/i, 'latitude', 'Fast mode needs a latitude and longitude.'],
+        [/^invalid proxy "([^"]*)"/i, 'proxies', function (m) {
+            return 'The proxy ' + m[1] + ' is not valid. Use http, https or socks5.';
+        }]
+    ];
+
+    // Client-side checks that mirror the server, so obvious mistakes never leave the page.
+    var localRules = [
+        ['name', function (v) { return v.trim() === '' ? 'Give the job a name.' : ''; }],
+        ['keywords', function (v) { return v.trim() === '' ? 'Add at least one search query.' : ''; }],
+        ['lang', function (v) { return /^[A-Za-z]{2}$/.test(v.trim()) ? '' : 'Use a two-letter language code, such as en or es.'; }]
+    ];
+
+    function field(id) { return document.getElementById(id); }
+
+    function isChanged(el) {
+        if (el.type === 'checkbox') return el.checked !== el.defaultChecked;
+        return el.value !== el.defaultValue;
+    }
+
+    function refreshAdvancedState() {
+        var changed = advancedFields.filter(function (id) { return isChanged(field(id)); }).length;
+        advancedState.textContent = changed === 0 ? 'Defaults' : (changed + ' changed');
+        advancedState.classList.toggle('is-changed', changed > 0);
+        if (changed > 0) advanced.open = true;
+    }
+
+    function refreshQueries() {
+        var lines = keywords.value.split('\n');
+        var total = lines.filter(function (l) { return l.trim() !== ''; }).length;
+        var numbers = [];
+        for (var i = 1; i <= Math.max(lines.length, 1); i++) numbers.push(i);
+        gutter.textContent = numbers.join('\n');
+        gutter.scrollTop = keywords.scrollTop;
+        queryCount.textContent = total === 1 ? '1 query' : total + ' queries';
+    }
+
+    function clearFieldError(el) {
+        el.removeAttribute('aria-invalid');
+        var msg = document.getElementById(el.id + '-error');
+        if (msg) msg.remove();
+        var described = (el.getAttribute('aria-describedby') || '').split(' ').filter(function (x) {
+            return x && x !== el.id + '-error';
+        });
+        if (described.length) el.setAttribute('aria-describedby', described.join(' '));
+        else el.removeAttribute('aria-describedby');
+    }
+
+    function clearErrors() {
+        errorBox.textContent = '';
+        form.querySelectorAll('[aria-invalid="true"]').forEach(clearFieldError);
+    }
+
+    function showFieldError(id, message) {
+        var el = field(id);
+        if (!el) return;
+        if (advancedFields.indexOf(id) !== -1) advanced.open = true;
+        el.setAttribute('aria-invalid', 'true');
+        var msg = document.createElement('p');
+        msg.className = 'field-error';
+        msg.id = id + '-error';
+        msg.textContent = message;
+        var anchor = el.closest('.query-editor') || el;
+        anchor.insertAdjacentElement('afterend', msg);
+        var described = (el.getAttribute('aria-describedby') || '').trim();
+        el.setAttribute('aria-describedby', (described + ' ' + msg.id).trim());
+    }
+
+    function showError(text, fieldId) {
+        errorBox.textContent = text;
+        statusBox.textContent = '';
+        if (fieldId) {
+            field(fieldId).focus();
+        } else {
+            errorBox.focus();
+        }
+    }
+
+    function setBusy(busy) {
+        submitBtn.disabled = busy;
+        submitBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
+        submitLabel.textContent = busy ? 'Creating job…' : 'Create job';
+        form.classList.toggle('is-sending', busy);
+    }
+
+    keywords.addEventListener('input', refreshQueries);
+    keywords.addEventListener('scroll', function () { gutter.scrollTop = keywords.scrollTop; });
+
+    form.addEventListener('input', function (e) {
+        if (e.target.getAttribute('aria-invalid') === 'true') clearFieldError(e.target);
+        if (advancedFields.indexOf(e.target.id) !== -1) refreshAdvancedState();
+    });
+    form.addEventListener('change', function (e) {
+        if (advancedFields.indexOf(e.target.id) !== -1) refreshAdvancedState();
+    });
+
+    document.querySelectorAll('[data-example]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var text = btn.getAttribute('data-example');
+            var current = keywords.value.replace(/\s+$/, '');
+            var lines = current.split('\n').map(function (l) { return l.trim(); });
+            if (lines.indexOf(text) === -1) {
+                keywords.value = current ? current + '\n' + text : text;
+            }
+            clearFieldError(keywords);
+            refreshQueries();
+            keywords.focus();
+        });
+    });
+
+    // Ctrl/Cmd + Enter submits from anywhere in the form.
+    form.addEventListener('keydown', function (e) {
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+            e.preventDefault();
+            if (!submitBtn.disabled) form.requestSubmit ? form.requestSubmit() : submitBtn.click();
+        }
+    });
+
+    // Run local checks before HTMX sends anything.
+    form.addEventListener('htmx:confirm', function (e) {
+        if (e.target !== form) return;
+        clearErrors();
+        var first = null;
+        localRules.forEach(function (rule) {
+            var msg = rule[1](field(rule[0]).value);
+            if (msg) {
+                showFieldError(rule[0], msg);
+                if (!first) first = rule[0];
+            }
+        });
+        if (first) {
+            e.preventDefault();
+            showError('Check the highlighted field before creating the job.', first);
+        }
+    });
+
+    form.addEventListener('htmx:beforeRequest', function (e) {
+        if (e.target !== form) return;
+        clearErrors();
+        statusBox.textContent = '';
+        setBusy(true);
+    });
+
+    form.addEventListener('htmx:afterRequest', function (e) {
+        if (e.target !== form) return;
+        setBusy(false);
+        var xhr = e.detail.xhr;
+
+        if (e.detail.successful) {
+            var name = field('name').value.trim();
+            statusBox.textContent = 'Job "' + name + '" created. It is at the top of the list.';
+            // htmx 1.9 swaps before afterRequest, so the new rows are already in place.
+            var row = document.querySelector('#job-tbody tr');
+            if (row) row.classList.add('is-new');
+            return;
+        }
+
+        if (!xhr || xhr.status === 0) {
+            showError('Could not reach the server. Check that the scraper is running and try again.');
+            return;
+        }
+
+        var raw = (xhr.responseText || '').trim();
+        for (var i = 0; i < errorRules.length; i++) {
+            var m = raw.match(errorRules[i][0]);
+            if (m) {
+                var msg = typeof errorRules[i][2] === 'function' ? errorRules[i][2](m) : errorRules[i][2];
+                showFieldError(errorRules[i][1], msg);
+                showError('Job not created. ' + msg, errorRules[i][1]);
+                return;
+            }
+        }
+        showError('Job not created. Server response: ' + (raw || 'error ' + xhr.status));
+    });
+
+    refreshQueries();
+    refreshAdvancedState();
+})();
 </script>
 </body>
 </html>

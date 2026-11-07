@@ -2,7 +2,7 @@
     <div class="map-modal-content">
         <div class="map-modal-header">
             <h2 id="map-modal-title">Places</h2>
-            <button type="button" class="map-modal-close" aria-label="Close" onclick="closeJobMap()">&times;</button>
+            <button type="button" class="map-modal-close" aria-label="Close map" onclick="closeJobMap()">&times;</button>
         </div>
         <div class="map-modal-body">
             <div id="job-map"></div>
@@ -76,7 +76,8 @@
         }
 
         function placeListItem(place, onSelect) {
-            var item = document.createElement('div');
+            var item = document.createElement('button');
+            item.type = 'button';
             item.className = 'place-item';
             item.innerHTML = '<div class="place-title">' + escapeHtml(place.title) + '</div>' +
                 (place.address ? '<div class="place-address">' + escapeHtml(place.address) + '</div>' : '') +
@@ -121,7 +122,18 @@
             renderPlaces(map, listEl);
         }
 
+        // Remember what opened the modal so focus can go back to it.
+        var opener = document.activeElement;
+
+        function onKeydown(e) {
+            if (e.key === 'Escape') {
+                window.closeJobMap();
+            }
+        }
+
         window.closeJobMap = function () {
+            document.removeEventListener('keydown', onKeydown);
+
             if (window.__jobMap) {
                 window.__jobMap.remove();
                 window.__jobMap = null;
@@ -131,7 +143,17 @@
             if (container) {
                 container.innerHTML = '';
             }
+
+            if (opener && document.body.contains(opener)) {
+                opener.focus();
+            }
         };
+
+        document.addEventListener('keydown', onKeydown);
+        var closeBtn = document.querySelector('#map-modal .map-modal-close');
+        if (closeBtn) {
+            closeBtn.focus();
+        }
 
         ensureLeaflet(initJobMap);
     })();
