@@ -12,6 +12,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.97.3
 	github.com/digitalocean/godo v1.173.0
 	github.com/go-chi/chi/v5 v5.3.0
+	github.com/go-sql-driver/mysql v1.7.1
 	github.com/golangci/golangci-lint/v2 v2.13.2
 	github.com/google/open-location-code/go v0.0.0-20250415120251-fa6d7f9d4765
 	github.com/gorilla/websocket v1.5.3

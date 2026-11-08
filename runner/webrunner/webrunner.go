@@ -2,6 +2,7 @@ package webrunner
 
 import (
 	"context"
+	"database/sql"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -9,11 +10,13 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"time"
 
 	"github.com/gosom/google-maps-scraper/deduper"
 	"github.com/gosom/google-maps-scraper/exiter"
+	"github.com/gosom/google-maps-scraper/mysqlstore"
 	"github.com/gosom/google-maps-scraper/runner"
 	"github.com/gosom/google-maps-scraper/tlmt"
 	"github.com/gosom/google-maps-scraper/web"
@@ -28,6 +31,7 @@ type webrunner struct {
 	srv       *web.Server
 	svc       *web.Service
 	cfg       *runner.Config
+	mysqlDB   *sql.DB
 	setupMate func(context.Context, io.Writer, *web.Job) (mateRunner, error)
 }
 
@@ -61,11 +65,23 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 		return nil, err
 	}
 
+	var mysqlDB *sql.DB
+
+	if cfg.MySQLDSN != "" {
+		mysqlDB, err = mysqlstore.Open(context.Background(), cfg.MySQLDSN)
+		if err != nil {
+			return nil, err
+		}
+
+		log.Printf("saving web job results to MySQL as well as CSV")
+	}
+
 	ans := webrunner{
 		srv:       srv,
 		svc:       svc,
 		cfg:       cfg,
-		setupMate: defaultSetupMate(cfg),
+		mysqlDB:   mysqlDB,
+		setupMate: defaultSetupMate(cfg, mysqlDB, svc),
 	}
 
 	return &ans, nil
@@ -86,6 +102,10 @@ func (w *webrunner) Run(ctx context.Context) error {
 }
 
 func (w *webrunner) Close(context.Context) error {
+	if w.mysqlDB != nil {
+		return w.mysqlDB.Close()
+	}
+
 	return nil
 }
 
@@ -139,23 +159,26 @@ func (w *webrunner) work(ctx context.Context) error {
 
 func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	job.Status = web.StatusWorking
+	job.Data.Run = web.JobRun{StartedAt: time.Now().UTC()}
+
+	w.svc.StartProgress(job.ID)
 
 	err := w.svc.Update(ctx, job)
 	if err != nil {
+		w.svc.StopProgress(job.ID)
+
 		return err
 	}
 
 	if len(job.Data.Keywords) == 0 {
-		job.Status = web.StatusFailed
-
-		return w.svc.Update(ctx, job)
+		return w.finishJob(ctx, job, web.StatusFailed, nil)
 	}
 
 	outpath := filepath.Join(w.cfg.DataFolder, job.ID+".csv")
 
 	outfile, err := os.Create(outpath)
 	if err != nil {
-		return err
+		return w.finishJob(ctx, job, web.StatusFailed, err)
 	}
 
 	defer func() {
@@ -164,19 +187,12 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 
 	setupMate := w.setupMate
 	if setupMate == nil {
-		setupMate = defaultSetupMate(w.cfg)
+		setupMate = defaultSetupMate(w.cfg, w.mysqlDB, w.svc)
 	}
 
 	mate, err := setupMate(ctx, outfile, job)
 	if err != nil {
-		job.Status = web.StatusFailed
-
-		err2 := w.svc.Update(ctx, job)
-		if err2 != nil {
-			log.Printf("failed to update job status: %v", err2)
-		}
-
-		return err
+		return w.finishJob(ctx, job, web.StatusFailed, err)
 	}
 
 	defer mate.Close()
@@ -209,14 +225,7 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		w.cfg.ExtraReviews || job.Data.ExtraReviews,
 	)
 	if err != nil {
-		job.Status = web.StatusFailed
-
-		err2 := w.svc.Update(ctx, job)
-		if err2 != nil {
-			log.Printf("failed to update job status: %v", err2)
-		}
-
-		return err
+		return w.finishJob(ctx, job, web.StatusFailed, err)
 	}
 
 	if len(seedJobs) > 0 {
@@ -245,25 +254,55 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 			cancel()
 
-			job.Status = web.StatusFailed
-
-			err2 := w.svc.Update(ctx, job)
-			if err2 != nil {
-				log.Printf("failed to update job status: %v", err2)
-			}
-
-			return err
+			return w.finishJob(ctx, job, web.StatusFailed, err)
 		}
 
 		cancel()
 	}
 
-	job.Status = web.StatusOK
-
-	return w.svc.Update(ctx, job)
+	return w.finishJob(ctx, job, web.StatusOK, nil)
 }
 
-func defaultSetupMate(cfg *runner.Config) func(context.Context, io.Writer, *web.Job) (mateRunner, error) {
+// finishJob records how the run ended (status, end time and places found)
+// and returns runErr, or the update error when there was no run error.
+func (w *webrunner) finishJob(ctx context.Context, job *web.Job, status string, runErr error) error {
+	job.Status = status
+	job.Data.Run.FinishedAt = time.Now().UTC()
+	job.Data.Run.Places = w.svc.StopProgress(job.ID)
+
+	// The job context may already be canceled here; the result still needs saving.
+	err := w.svc.Update(context.WithoutCancel(ctx), job)
+	if err != nil {
+		log.Printf("failed to update job status: %v", err)
+	}
+
+	if runErr != nil {
+		return runErr
+	}
+
+	return err
+}
+
+// progressWriter counts places as they are found, for the live job list.
+type progressWriter struct {
+	add func(int)
+}
+
+func (p *progressWriter) Run(_ context.Context, in <-chan scrapemate.Result) error {
+	for result := range in {
+		n := 1
+
+		if v := reflect.ValueOf(result.Data); v.Kind() == reflect.Slice {
+			n = v.Len()
+		}
+
+		p.add(n)
+	}
+
+	return nil
+}
+
+func defaultSetupMate(cfg *runner.Config, mysqlDB *sql.DB, svc *web.Service) func(context.Context, io.Writer, *web.Job) (mateRunner, error) {
 	return func(_ context.Context, writer io.Writer, job *web.Job) (mateRunner, error) {
 		opts := []func(*scrapemateapp.Config) error{
 			scrapemateapp.WithConcurrency(cfg.Concurrency),
@@ -303,9 +342,20 @@ func defaultSetupMate(cfg *runner.Config) func(context.Context, io.Writer, *web.
 
 		log.Printf("job %s has proxy: %v", job.ID, hasProxy)
 
-		csvWriter := csvwriter.NewCsvWriter(csv.NewWriter(writer))
+		resultWriters := []scrapemate.ResultWriter{
+			csvwriter.NewCsvWriter(csv.NewWriter(writer)),
+		}
 
-		writers := []scrapemate.ResultWriter{csvWriter}
+		if mysqlDB != nil {
+			resultWriters = append(resultWriters, mysqlstore.NewResultWriter(mysqlDB, job.ID, job.Name))
+		}
+
+		if svc != nil {
+			jobID := job.ID
+			resultWriters = append(resultWriters, &progressWriter{add: func(n int) { svc.AddProgress(jobID, n) }})
+		}
+
+		writers := []scrapemate.ResultWriter{newTeeWriter(resultWriters...)}
 
 		matecfg, err := scrapemateapp.NewConfig(
 			writers,

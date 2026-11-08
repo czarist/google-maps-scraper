@@ -83,6 +83,7 @@ type Config struct {
 	DisablePageReuse         bool
 	ExtraReviews             bool
 	LeadsDBAPIKey            string
+	MySQLDSN                 string
 	BrowserPoolSize          int
 	MaxPagesPerBrowser       int
 	Resume                   bool
@@ -142,6 +143,7 @@ func ParseConfig() *Config {
 	flag.BoolVar(&cfg.DisablePageReuse, "disable-page-reuse", false, "disable page reuse in playwright")
 	flag.BoolVar(&cfg.ExtraReviews, "extra-reviews", false, "enable extra reviews collection")
 	flag.StringVar(&cfg.LeadsDBAPIKey, "leadsdb-api-key", "", "LeadsDB API key for exporting results to LeadsDB")
+	flag.StringVar(&cfg.MySQLDSN, "mysql-dsn", os.Getenv("MYSQL_DSN"), "MySQL DSN to also save web runner results, e.g. user:pass@tcp(host:3306)/db [env: MYSQL_DSN]")
 	flag.BoolVar(&cfg.Resume, "resume", false, "resume a CLI file scrape by reading existing results and appending missing places")
 	flag.StringVar(&cfg.GridBBox, "grid-bbox", "", "bounding box for grid scraping: 'minLat,minLon,maxLat,maxLon' (e.g. '40.30,-3.80,40.50,-3.60')")
 	flag.Float64Var(&cfg.GridCellKm, "grid-cell", 1.0, "grid cell size in km [default: 1.0]. Use with -grid-bbox")

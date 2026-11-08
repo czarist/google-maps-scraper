@@ -1,0 +1,45 @@
+# Web UI + MySQL. Every job is saved as CSV in ./gmapsdata and in the
+# `places` table of the `gmaps` database.
+#
+#   docker compose -f docker-compose.mysql.yaml up -d --build
+#
+# Web UI: http://localhost:8080
+# MySQL:  127.0.0.1:3306, database gmaps, user gmaps, password gmaps
+#
+# Change the passwords below before exposing this anywhere but your machine.
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: gmaps
+      MYSQL_USER: gmaps
+      MYSQL_PASSWORD: gmaps
+      MYSQL_ROOT_PASSWORD: gmaps-root
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-ugmaps", "-pgmaps"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  scraper:
+    build: .
+    image: gmaps-local
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_DSN: "gmaps:gmaps@tcp(mysql:3306)/gmaps?parseTime=true&charset=utf8mb4"
+    command: ["-data-folder", "/gmapsdata"]
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./gmapsdata:/gmapsdata
+
+volumes:
+  mysql-data:
