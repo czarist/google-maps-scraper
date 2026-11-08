@@ -6,11 +6,49 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
 )
 
 type Service struct {
 	repo       JobRepository
 	dataFolder string
+
+	// progress holds a live place counter (*atomic.Int64) per running job.
+	progress sync.Map
+}
+
+// StartProgress starts a live place counter for a job.
+func (s *Service) StartProgress(id string) {
+	s.progress.Store(id, new(atomic.Int64))
+}
+
+// AddProgress adds found places to a running job's counter.
+func (s *Service) AddProgress(id string, n int) {
+	if v, ok := s.progress.Load(id); ok {
+		v.(*atomic.Int64).Add(int64(n)) //nolint:errcheck // only *atomic.Int64 is stored
+	}
+}
+
+// Progress returns how many places a running job has found so far.
+func (s *Service) Progress(id string) (int, bool) {
+	v, ok := s.progress.Load(id)
+	if !ok {
+		return 0, false
+	}
+
+	return int(v.(*atomic.Int64).Load()), true //nolint:errcheck // only *atomic.Int64 is stored
+}
+
+// StopProgress removes a job's counter and returns its final value.
+func (s *Service) StopProgress(id string) int {
+	v, ok := s.progress.LoadAndDelete(id)
+	if !ok {
+		return 0
+	}
+
+	return int(v.(*atomic.Int64).Load()) //nolint:errcheck // only *atomic.Int64 is stored
 }
 
 type jobCounter interface {
@@ -69,7 +107,30 @@ func (s *Service) ListJobs(ctx context.Context, page, limit int) (JobPage, error
 		return ans, err
 	}
 
+	for i := range jobs {
+		if jobs[i].Status != StatusWorking {
+			continue
+		}
+
+		if n, ok := s.Progress(jobs[i].ID); ok {
+			jobs[i].Data.Run.Places = n
+		}
+	}
+
+	running, err := s.countJobs(ctx, SelectParams{Status: StatusWorking})
+	if err != nil {
+		return ans, err
+	}
+
+	queued, err := s.countJobs(ctx, SelectParams{Status: StatusPending})
+	if err != nil {
+		return ans, err
+	}
+
 	ans = JobPage{
+		Running:     running,
+		Queued:      queued,
+		RenderedAt:  time.Now().UTC(),
 		Jobs:        jobs,
 		CurrentPage: page,
 		TotalPages:  totalPages,

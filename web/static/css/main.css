@@ -613,18 +613,26 @@ tbody tr:last-child td {
     border-bottom: 0;
 }
 
+#job-table td:first-child {
+    min-width: 10rem;
+}
+
 .job-name {
     display: block;
     font-weight: 600;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
 }
 
+/* Full id stays available in the title tooltip. */
 .job-id {
     display: block;
+    max-width: 12rem;
     font-size: 0.75rem;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 td time {
@@ -681,8 +689,9 @@ td time {
     white-space: nowrap;
 }
 
-.actions > * + * {
-    margin-left: 6px;
+/* Buttons wrap onto a second line instead of being cut off. */
+.actions > * {
+    margin: 3px 0 3px 6px;
 }
 
 .btn-quiet,
@@ -722,6 +731,111 @@ td time {
 .btn-danger:hover {
     border-color: var(--pin);
     background: var(--pin-tint);
+}
+
+/* Live job activity */
+
+.jobs-summary {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.9375rem;
+}
+
+.summary-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: 999px;
+    font-weight: 600;
+    font-size: 0.875rem;
+    font-variant-numeric: tabular-nums;
+}
+
+.summary-item::before {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.summary-running {
+    color: var(--wait);
+    background: var(--wait-tint);
+}
+
+.summary-running::before {
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+.summary-queued {
+    color: var(--muted);
+    background: var(--land);
+}
+
+.run {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-top: 8px;
+    min-width: 150px;
+    max-width: 220px;
+}
+
+.run-line {
+    margin: 0;
+    text-wrap: pretty;
+    font-size: 0.875rem;
+    line-height: 1.35;
+    font-variant-numeric: tabular-nums;
+}
+
+.run-muted {
+    color: var(--muted);
+}
+
+td > .run-line {
+    margin-top: 6px;
+}
+
+.run-count {
+    display: inline-block;
+    font-weight: 800;
+    color: var(--ink);
+    border-radius: 4px;
+}
+
+.run-count.is-bumped {
+    animation: bump 1.2s ease-out;
+}
+
+@keyframes bump {
+    from { background-color: var(--wait-tint); }
+    to { background-color: transparent; }
+}
+
+.budget {
+    height: 4px;
+    border-radius: 999px;
+    background: var(--land-deep);
+    overflow: hidden;
+}
+
+.budget-fill {
+    display: block;
+    height: 100%;
+    width: 0;
+    border-radius: inherit;
+    background: var(--water);
+    transition: width 1s linear;
+}
+
+.budget.is-near-limit .budget-fill {
+    background: var(--wait);
 }
 
 .empty-row td {
@@ -914,7 +1028,7 @@ tr.is-new td {
 
 /* Narrow screens */
 
-@media (max-width: 960px) {
+@media (max-width: 1180px) {
     .layout {
         grid-template-columns: minmax(0, 1fr);
     }
@@ -981,7 +1095,7 @@ tr.is-new td {
         padding: 4px 0;
     }
 
-    #job-table td[data-label="Created"]::before,
+    #job-table td[data-label="Created (UTC)"]::before,
     #job-table td[data-label="Status"]::before {
         content: attr(data-label) ": ";
         color: var(--muted);
@@ -997,8 +1111,16 @@ tr.is-new td {
         padding-top: 10px !important;
     }
 
-    .actions > * + * {
-        margin-left: 0;
+    .actions > * {
+        margin: 0;
+    }
+
+    #job-table td:first-child {
+        min-width: 0;
+    }
+
+    .job-id {
+        max-width: 100%;
     }
 
     .map-modal {

@@ -1,15 +1,35 @@
-<tbody id="job-tbody" hx-get="/jobs?page={{.CurrentPage}}" hx-trigger="every 10s" hx-swap="outerHTML">
+<tbody id="job-tbody" hx-get="/jobs?page={{.CurrentPage}}" hx-trigger="every {{if .Active}}3s{{else}}10s{{end}}" hx-swap="outerHTML"
+       data-running="{{.Running}}" data-queued="{{.Queued}}" data-server-now="{{.RenderedAtISO}}">
 {{range .Jobs}}
 <tr>
     <td data-label="Job">
         <span class="job-name">{{.Name}}</span>
-        <span class="job-id">{{.ID}}</span>
+        <span class="job-id" title="{{.ID}}">{{.ID}}</span>
     </td>
-    <td data-label="Created">
-        <time datetime="{{.Date.Format "2006-01-02T15:04:05Z07:00"}}">{{.Date.Format "2006-01-02 15:04"}} UTC</time>
+    <td data-label="Created (UTC)">
+        <time datetime="{{.Date.Format "2006-01-02T15:04:05Z07:00"}}">{{.Date.Format "2006-01-02 15:04"}}</time>
     </td>
     <td data-label="Status">
         <span class="status status-{{.Status}}">{{if eq .Status "ok"}}Completed{{else if eq .Status "pending"}}Queued{{else if eq .Status "working"}}Running{{else if eq .Status "failed"}}Failed{{else}}{{.Status}}{{end}}</span>
+        {{if eq .Status "working"}}
+        <div class="run" data-job="{{.ID}}" data-places="{{.Data.Run.Places}}">
+            <p class="run-line"><strong class="run-count">{{.Data.Run.Places}}</strong> {{if eq .Data.Run.Places 1}}place{{else}}places{{end}} found</p>
+            {{if .Data.Run.Started}}
+            <div class="budget" role="progressbar" aria-label="Time used of the {{.Data.MaxTimeLabel}} limit"
+                 aria-valuemin="0" aria-valuemax="{{.Data.MaxSeconds}}" aria-valuenow="{{.ElapsedSeconds}}"
+                 data-started="{{.Data.Run.StartedAtISO}}" data-limit="{{.Data.MaxSeconds}}">
+                <span class="budget-fill" style="width: {{.TimeUsedPercent}}%"></span>
+            </div>
+            <p class="run-line run-muted"><span role="timer" data-elapsed="{{.Data.Run.StartedAtISO}}">{{.ElapsedLabel}}</span> of {{.Data.MaxTimeLabel}} limit</p>
+            {{end}}
+        </div>
+        {{else if eq .Status "pending"}}
+        <p class="run-line run-muted">{{if gt $.Running 0}}Starts after the running job{{else}}Starting in a moment{{end}}</p>
+        {{else if and (eq .Status "ok") .Data.Run.Started}}
+        <p class="run-line run-muted">{{.Data.Run.Places}} {{if eq .Data.Run.Places 1}}place{{else}}places{{end}} in {{.Data.Run.Took}}</p>
+        {{else if and (eq .Status "failed") .Data.Run.Started}}
+        <p class="run-line run-muted">Stopped after {{.Data.Run.Took}}{{if gt .Data.Run.Places 0}}, {{.Data.Run.Places}} {{if eq .Data.Run.Places 1}}place{{else}}places{{end}} saved{{end}}</p>
+        {{end}}
     </td>
     <td class="actions">
         {{ if eq .Status "ok" }}
@@ -17,8 +37,8 @@
                     hx-get="/view?id={{.ID}}"
                     hx-target="#map-modal-container"
                     hx-swap="innerHTML"
-                    aria-label="View {{.Name}} on map">View on map</button>
-            <a href="/download?id={{.ID}}" download class="btn-quiet download-button" aria-label="Download CSV for {{.Name}}">Download CSV</a>
+                    aria-label="View {{.Name}} on map">Map</button>
+            <a href="/download?id={{.ID}}" download class="btn-quiet download-button" aria-label="Download CSV for {{.Name}}">CSV</a>
         {{ end }}
         <button hx-delete="/delete?id={{.ID}}&page={{$.CurrentPage}}"
                 hx-target="#job-tbody"

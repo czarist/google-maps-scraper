@@ -172,14 +172,14 @@
         <section class="panel panel-jobs" aria-labelledby="jobs-title">
             <div class="jobs-head">
                 <h2 id="jobs-title">Jobs</h2>
-                <p class="hint">The list refreshes every 10 seconds.</p>
+                <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
             </div>
             <div class="table-wrap">
                 <table id="job-table">
                     <thead>
                         <tr>
                             <th scope="col">Job</th>
-                            <th scope="col">Created</th>
+                            <th scope="col">Created (UTC)</th>
                             <th scope="col">Status</th>
                             <th scope="col"><span class="visually-hidden">Actions</span></th>
                         </tr>
@@ -414,6 +414,93 @@ function hideSponsor() {
 
     refreshQueries();
     refreshAdvancedState();
+})();
+
+// Live job activity: summary, elapsed timers and time-limit bars.
+(function () {
+    var summary = document.getElementById('jobs-summary');
+    var baseTitle = document.title;
+    var clockOffset = 0; // server time minus browser time, in ms
+    var lastCounts = {};
+
+    function formatDuration(totalSeconds) {
+        var s = Math.max(0, Math.floor(totalSeconds));
+        var h = Math.floor(s / 3600);
+        var m = Math.floor((s % 3600) / 60);
+        var sec = s % 60;
+        if (h > 0) return m > 0 ? h + 'h ' + m + 'm' : h + 'h';
+        if (m > 0) return sec > 0 ? m + 'm ' + sec + 's' : m + 'm';
+        return sec + 's';
+    }
+
+    function elapsedSince(iso) {
+        var started = Date.parse(iso);
+        if (isNaN(started)) return 0;
+        return (Date.now() + clockOffset - started) / 1000;
+    }
+
+    function tick() {
+        document.querySelectorAll('[data-elapsed]').forEach(function (el) {
+            el.textContent = formatDuration(elapsedSince(el.getAttribute('data-elapsed')));
+        });
+
+        document.querySelectorAll('.budget[data-started]').forEach(function (bar) {
+            var limit = Number(bar.getAttribute('data-limit')) || 0;
+            var elapsed = elapsedSince(bar.getAttribute('data-started'));
+            var used = limit > 0 ? Math.min(1, elapsed / limit) : 0;
+            bar.querySelector('.budget-fill').style.width = (used * 100).toFixed(1) + '%';
+            bar.classList.toggle('is-near-limit', used >= 0.85);
+            bar.setAttribute('aria-valuenow', String(Math.min(Math.floor(elapsed), limit)));
+            bar.setAttribute('aria-valuetext', formatDuration(elapsed) + ' of ' + formatDuration(limit));
+        });
+    }
+
+    function syncFromList(tbody) {
+        var serverNow = Date.parse(tbody.getAttribute('data-server-now'));
+        if (!isNaN(serverNow)) clockOffset = serverNow - Date.now();
+
+        var running = Number(tbody.getAttribute('data-running')) || 0;
+        var queued = Number(tbody.getAttribute('data-queued')) || 0;
+
+        if (running === 0 && queued === 0) {
+            summary.textContent = 'Nothing running right now.';
+        } else {
+            summary.innerHTML = '';
+            [[running, 'running'], [queued, 'queued']].forEach(function (pair) {
+                if (pair[0] === 0) return;
+                var item = document.createElement('span');
+                item.className = 'summary-item summary-' + pair[1];
+                item.textContent = pair[0] + ' ' + pair[1];
+                summary.appendChild(item);
+            });
+        }
+
+        document.title = running > 0 ? '(' + running + ' running) ' + baseTitle : baseTitle;
+
+        // Mark counters that went up since the last refresh.
+        var seen = {};
+        tbody.querySelectorAll('.run[data-job]').forEach(function (run) {
+            var id = run.getAttribute('data-job');
+            var count = Number(run.getAttribute('data-places')) || 0;
+            if (lastCounts[id] !== undefined && count > lastCounts[id]) {
+                run.querySelector('.run-count').classList.add('is-bumped');
+            }
+            seen[id] = count;
+        });
+        lastCounts = seen;
+
+        tick();
+    }
+
+    document.body.addEventListener('htmx:load', function (e) {
+        if (e.detail && e.detail.elt && e.detail.elt.id === 'job-tbody') {
+            syncFromList(e.detail.elt);
+        }
+    });
+
+    setInterval(function () {
+        if (!document.hidden) tick();
+    }, 1000);
 })();
 </script>
 </body>
