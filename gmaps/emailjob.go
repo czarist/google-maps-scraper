@@ -62,6 +62,12 @@ func WithEmailJobWriterManagedCompletion() EmailExtractJobOptions {
 	}
 }
 
+// DirectFetch tells the fetcher to load the business website without the job proxy.
+// Google Maps search keeps the proxy.
+func (j *EmailExtractJob) DirectFetch() bool {
+	return true
+}
+
 func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response) (any, []scrapemate.IJob, error) {
 	defer func() {
 		resp.Document = nil

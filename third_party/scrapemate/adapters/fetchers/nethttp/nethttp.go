@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gosom/scrapemate"
 )
@@ -53,7 +54,20 @@ func (o *httpFetch) Fetch(ctx context.Context, job scrapemate.IJob) scrapemate.R
 		req.Header.Add(k, v)
 	}
 
-	resp, err := o.netClient.Do(req)
+	doer := o.netClient
+	if scrapemate.SkipsProxy(job) {
+		timeout := job.GetTimeout()
+		if timeout <= 0 {
+			timeout = 30 * time.Second
+		}
+
+		doer = &http.Client{
+			Timeout:   timeout,
+			Transport: &http.Transport{Proxy: nil},
+		}
+	}
+
+	resp, err := doer.Do(req)
 	if err != nil {
 		ans.Error = err
 		return ans

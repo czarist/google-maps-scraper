@@ -49,11 +49,34 @@ func (repo *repo) Create(ctx context.Context, job *web.Job) error {
 }
 
 func (repo *repo) Delete(ctx context.Context, id string) error {
-	const q = `DELETE FROM jobs WHERE id = ?`
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
 
-	_, err := repo.db.ExecContext(ctx, q, id)
+	committed := false
 
-	return err
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM campaign_jobs WHERE job_id = ?`, id); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM jobs WHERE id = ?`, id); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+
+	committed = true
+
+	return nil
 }
 
 func (repo *repo) Select(ctx context.Context, params web.SelectParams) ([]web.Job, error) {
@@ -231,6 +254,11 @@ func initDatabase(path string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	_, err = db.Exec("PRAGMA foreign_keys = ON")
+	if err != nil {
+		return nil, err
+	}
+
 	return db, createSchema(db)
 }
 
@@ -248,6 +276,9 @@ func createSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_jobs_created_at_id
 			ON jobs (created_at DESC, id DESC);
 	`)
+	if err != nil {
+		return err
+	}
 
-	return err
+	return ensureCampaignSchema(db)
 }

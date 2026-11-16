@@ -15,11 +15,47 @@
     --ok-tint: #e3f2e8;
     --wait: #8a6100;
     --wait-tint: #fbf1d9;
+    --line-strong: #9fb0a6;
+    --placeholder: #8b979f;
+    --inset: #fbfcfb;
+    --pin-ink: #8f241c;
+    --ok-ink: #1f5534;
+    --water-disabled: #4f7f95;
+    --on-water: #fff;
+    --scrim: rgba(27, 39, 50, 0.6);
 
     --radius-field: 6px;
     --radius-panel: 10px;
     --font: 'Overpass', 'Segoe UI', system-ui, -apple-system, sans-serif;
-    --focus: 0 0 0 3px #ffffff, 0 0 0 5px var(--water);
+    --focus: 0 0 0 3px var(--surface), 0 0 0 5px var(--water);
+}
+
+/* Same map palette at night: deep water, pale land ink, the red pin stays red. */
+html[data-theme="dark"] {
+    color-scheme: dark;
+    --land: #10181f;
+    --land-deep: #1a242d;
+    --surface: #1a2730;
+    --ink: #e6eee8;
+    --muted: #b3c0ba;
+    --line: #314250;
+    --line-strong: #56707e;
+    --water: #8ec8dc;
+    --water-dark: #b9dcea;
+    --water-tint: #17323c;
+    --water-disabled: #5f8fa0;
+    --pin: #ff9b93;
+    --pin-ink: #ffd4cf;
+    --pin-tint: #3d2422;
+    --ok: #9ed7b4;
+    --ok-ink: #d8f3e4;
+    --ok-tint: #1a3326;
+    --wait: #e6c98a;
+    --wait-tint: #3a3118;
+    --placeholder: #8ea0aa;
+    --inset: #141e26;
+    --on-water: #0c1820;
+    --scrim: rgba(5, 8, 12, 0.72);
 }
 
 *,
@@ -29,6 +65,7 @@
 }
 
 html {
+    color-scheme: light;
     -webkit-text-size-adjust: 100%;
 }
 
@@ -52,11 +89,17 @@ body {
 }
 
 h1,
-h2 {
+h2,
+h3 {
     margin: 0;
     font-weight: 800;
     letter-spacing: -0.01em;
     line-height: 1.15;
+}
+
+.panel h3 {
+    margin: 28px 0 12px;
+    font-size: 1.125rem;
 }
 
 a {
@@ -83,8 +126,8 @@ a {
     top: -60px;
     z-index: 10;
     padding: 10px 14px;
-    background: var(--ink);
-    color: #fff;
+    background: var(--water);
+    color: var(--on-water);
     border-radius: var(--radius-field);
     text-decoration: none;
     font-weight: 600;
@@ -148,6 +191,40 @@ a {
     text-underline-offset: 4px;
 }
 
+.topnav a[aria-current="page"] {
+    color: var(--ink);
+}
+
+.theme-toggle {
+    font: inherit;
+    font-weight: 600;
+    font-size: 0.9375rem;
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 6px 12px;
+    cursor: pointer;
+}
+
+.theme-toggle:hover {
+    color: var(--ink);
+    border-color: var(--water);
+    background: var(--water-tint);
+}
+
+.theme-label-light {
+    display: none;
+}
+
+html[data-theme="dark"] .theme-label-dark {
+    display: none;
+}
+
+html[data-theme="dark"] .theme-label-light {
+    display: inline;
+}
+
 /* Layout */
 
 .layout {
@@ -175,6 +252,39 @@ a {
 
 .panel-form h1 {
     font-size: 1.75rem;
+}
+
+.layout-campaign {
+    grid-template-columns: minmax(380px, 720px) minmax(280px, 1fr);
+}
+
+.layout-campaign .panel-form {
+    position: static;
+}
+
+textarea.mail-body {
+    min-height: 280px;
+    font-family: ui-monospace, "Cascadia Code", Consolas, monospace;
+    font-size: 0.875rem;
+}
+
+.mail-preview {
+    width: 100%;
+    min-height: 360px;
+    margin: 0 0 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-field);
+    background: var(--surface);
+}
+
+.mail-preview-text {
+    white-space: pre-wrap;
+    margin: 0 0 24px;
+    padding: 16px;
+    min-height: 160px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-field);
+    background: var(--surface);
 }
 
 .lede {
@@ -237,6 +347,10 @@ label {
 
 input[type="text"],
 input[type="number"],
+input[type="email"],
+input[type="password"],
+input[type="file"],
+select,
 textarea {
     width: 100%;
     font: inherit;
@@ -251,23 +365,27 @@ textarea {
 
 input[type="text"]:hover,
 input[type="number"]:hover,
+input[type="email"]:hover,
+input[type="password"]:hover,
+select:hover,
 textarea:hover {
-    border-color: #9fb0a6;
+    border-color: var(--line-strong);
 }
 
 input:focus-visible,
+select:focus-visible,
 textarea:focus-visible {
     border-color: var(--water);
 }
 
 input::placeholder,
 textarea::placeholder {
-    color: #8b979f;
+    color: var(--placeholder);
 }
 
 [aria-invalid="true"] {
     border-color: var(--pin) !important;
-    background-color: #fffafa;
+    background-color: var(--pin-tint);
 }
 
 .field-error {
@@ -342,7 +460,7 @@ textarea::placeholder {
 }
 
 .query-editor textarea[aria-invalid="true"] {
-    background: #fffafa;
+    background: var(--pin-tint);
 }
 
 .examples {
@@ -379,7 +497,7 @@ textarea::placeholder {
 .advanced {
     border: 1px solid var(--line);
     border-radius: var(--radius-field);
-    background: #fbfcfb;
+    background: var(--inset);
 }
 
 .advanced summary {
@@ -496,7 +614,7 @@ button {
     padding: 12px 26px;
     font-weight: 800;
     font-size: 1rem;
-    color: #fff;
+    color: var(--on-water);
     background: var(--water);
     border: 0;
     border-radius: var(--radius-field);
@@ -510,15 +628,15 @@ button {
 
 .btn-primary:disabled {
     cursor: progress;
-    background: #4f7f95;
+    background: var(--water-disabled);
 }
 
 .btn-spinner {
     display: none;
     width: 16px;
     height: 16px;
-    border: 2px solid rgba(255, 255, 255, 0.4);
-    border-top-color: #fff;
+    border: 2px solid color-mix(in srgb, var(--on-water) 40%, transparent);
+    border-top-color: var(--on-water);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
 }
@@ -559,13 +677,13 @@ form.is-sending .advanced {
 }
 
 .notice-error {
-    color: #8f241c;
+    color: var(--pin-ink);
     background: var(--pin-tint);
     border-color: var(--pin);
 }
 
 .notice-success {
-    color: #1f5534;
+    color: var(--ok-ink);
     background: var(--ok-tint);
     border-color: var(--ok);
 }
@@ -633,6 +751,24 @@ tbody tr:last-child td {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.job-campaign {
+    display: block;
+    margin: 2px 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--water);
+    text-decoration: none;
+}
+
+.job-campaign:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+form.form-inline {
+    display: inline;
 }
 
 td time {
@@ -719,7 +855,7 @@ td time {
 }
 
 .btn-quiet:disabled {
-    color: #9aa5ad;
+    color: var(--placeholder);
     cursor: not-allowed;
 }
 
@@ -919,7 +1055,7 @@ tr.is-new td {
     position: fixed;
     inset: 0;
     z-index: 1000;
-    background: rgba(27, 39, 50, 0.6);
+    background: var(--scrim);
     justify-content: center;
     align-items: center;
     padding: 16px;

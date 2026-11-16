@@ -8,6 +8,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
+    <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
     <!-- job_rows.html returns a <tbody> plus an out-of-band <div>. htmx 1.x only parses that
          correctly with template fragments on; without it the swap drops #job-tbody. -->
@@ -25,7 +26,9 @@
             </svg>
             <span class="brand-name">Google Maps Scraper</span>
         </div>
-        <nav class="topnav" aria-label="Project links">
+        <nav class="topnav" aria-label="Sections">
+            <a href="/" aria-current="page">Jobs</a>
+            <a href="/campaigns">Campaigns</a>
             <a href="/api/docs" target="_blank" rel="noopener noreferrer">API documentation</a>
             <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">
                 <svg height="14" width="14" viewBox="0 0 16 16" aria-hidden="true">
@@ -33,6 +36,10 @@
                 </svg>
                 Star on GitHub
             </a>
+            <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
+                <span class="theme-label-dark">Dark mode</span>
+                <span class="theme-label-light">Light mode</span>
+            </button>
         </nav>
     </header>
 
@@ -85,6 +92,17 @@
                         <option value="de">German</option>
                     </datalist>
                     <p class="hint" id="lang-hint">Two-letter code, such as en, es or de.</p>
+                </div>
+
+                <div class="field">
+                    <label for="campaign_id">Campaign</label>
+                    <select id="campaign_id" name="campaign_id">
+                        <option value="">No campaign</option>
+                        {{range .Campaigns}}
+                        <option value="{{.ID}}">{{.Name}}</option>
+                        {{end}}
+                    </select>
+                    <p class="hint">Optional. Group this job under a campaign. <a href="/campaigns">Manage campaigns</a></p>
                 </div>
 
                 <details class="advanced" id="advanced">
@@ -153,7 +171,7 @@
                                 <label for="proxies">One proxy per line</label>
                                 <textarea id="proxies" name="proxies" rows="4" wrap="off" spellcheck="false" aria-describedby="proxies-hint"
                                           placeholder="http://user:pass@host:port&#10;socks5://host:port">{{.ProxiesString}}</textarea>
-                                <p class="hint" id="proxies-hint">Supports http, https and socks5. Leave empty to connect directly.</p>
+                                <p class="hint" id="proxies-hint">Supports http, https and socks5. Leave empty to connect directly. Proxies are used for Google search. Collecting emails from business websites stays direct.</p>
                             </div>
                         </fieldset>
                     </div>

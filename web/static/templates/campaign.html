@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Campaign.Name}} — Google Maps Scraper</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
+    <script src="/static/js/theme.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    {{if .Running}}<meta http-equiv="refresh" content="3">{{end}}
+</head>
+<body>
+    <a class="skip-link" href="#smtp_host">Skip to email settings</a>
+
+    <header class="topbar">
+        <div class="brand">
+            <svg class="brand-pin" width="22" height="28" viewBox="0 0 22 28" aria-hidden="true">
+                <path d="M11 0C4.9 0 0 4.8 0 10.8 0 18.9 11 28 11 28s11-9.1 11-17.2C22 4.8 17.1 0 11 0Z"/>
+                <circle cx="11" cy="10.5" r="4" fill="#fff"/>
+            </svg>
+            <span class="brand-name">Google Maps Scraper</span>
+        </div>
+        <nav class="topnav" aria-label="Sections">
+            <a href="/">Jobs</a>
+            <a href="/campaigns" aria-current="page">Campaigns</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer">API documentation</a>
+            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">Star on GitHub</a>
+            <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
+                <span class="theme-label-dark">Dark mode</span>
+                <span class="theme-label-light">Light mode</span>
+            </button>
+        </nav>
+    </header>
+
+    <main class="layout layout-campaign">
+        <section class="panel panel-form" aria-labelledby="mail-title">
+            <h1 id="mail-title">Email dispatch</h1>
+            <p class="lede">These settings are used only for {{.Campaign.Name}}.</p>
+
+            {{if .Error}}<div class="notice notice-error" role="alert">{{.Error}}</div>{{end}}
+            {{if .Notice}}<div class="notice notice-success" role="status">{{.Notice}}</div>{{end}}
+            {{if .Running}}<div class="notice notice-success" role="status">{{if .RunningDetail}}{{.RunningDetail}}{{else}}Sending now.{{end}}</div>{{end}}
+
+            <form id="mail-form" method="post" action="/campaigns/{{.Campaign.ID}}/mail" data-id="{{.Campaign.ID}}">
+                <fieldset>
+                    <legend>SMTP server</legend>
+                    <div class="field">
+                        <label for="smtp_host">Host</label>
+                        <input type="text" id="smtp_host" name="smtp_host" value="{{.Mail.Host}}" autocomplete="off" placeholder="mailpit">
+                        <p class="hint">Dev inbox: host <code>mailpit</code>, port <code>1025</code>, no encryption. Open <a href="http://127.0.0.1:8025">Mailpit</a>.</p>
+                    </div>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label for="smtp_port">Port</label>
+                            <input type="number" id="smtp_port" name="smtp_port" min="1" max="65535" value="{{.Mail.Port}}" required>
+                        </div>
+                        <div class="field">
+                            <label for="encryption">Encryption</label>
+                            <select id="encryption" name="encryption">
+                                <option value="starttls" {{if .Mail.EncryptionIs "starttls"}}selected{{end}}>STARTTLS (usually 587)</option>
+                                <option value="ssl" {{if .Mail.EncryptionIs "ssl"}}selected{{end}}>SSL (usually 465)</option>
+                                <option value="none" {{if .Mail.EncryptionIs "none"}}selected{{end}}>No encryption</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="smtp_username">Username</label>
+                        <input type="text" id="smtp_username" name="smtp_username" value="{{.Mail.Username}}" autocomplete="off">
+                        <p class="hint">Leave empty if the server does not require a login.</p>
+                    </div>
+                    <div class="field">
+                        <label for="smtp_password">Password</label>
+                        <input type="password" id="smtp_password" name="smtp_password" value="" autocomplete="new-password">
+                        {{if .PasswordSet}}
+                        <p class="hint">A password is saved. Leave this blank to keep it.</p>
+                        {{else}}
+                        <p class="hint">Stored for this campaign only. Required before sending.</p>
+                        {{end}}
+                    </div>
+                </fieldset>
+
+                <fieldset>
+                    <legend>Message</legend>
+                    <div class="grid-2">
+                        <div class="field">
+                            <label for="from_email">From email</label>
+                            <input type="email" id="from_email" name="from_email" value="{{.Mail.FromEmail}}" autocomplete="off">
+                        </div>
+                        <div class="field">
+                            <label for="from_name">From name</label>
+                            <input type="text" id="from_name" name="from_name" value="{{.Mail.FromName}}" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="field">
+                        <label for="subject">Subject</label>
+                        <input type="text" id="subject" name="subject" value="{{.Mail.Subject}}" maxlength="500" autocomplete="off">
+                    </div>
+                    <div class="field">
+                        <label for="format">Body format</label>
+                        <select id="format" name="format">
+                            <option value="plain" {{if .Mail.FormatIs "plain"}}selected{{end}}>Plain text</option>
+                            <option value="html" {{if .Mail.FormatIs "html"}}selected{{end}}>HTML</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="html_file">HTML file</label>
+                        <input type="file" id="html_file" accept=".html,.htm,text/html">
+                        <p class="hint">The file is loaded into the editor. Change it there, then save. Nothing is stored until you save.</p>
+                    </div>
+                    <div class="field">
+                        <label for="body">Body</label>
+                        <textarea id="body" name="body" class="mail-body" rows="16" spellcheck="false">{{.Mail.Body}}</textarea>
+                        <p class="hint">Placeholders: {{"{{.Title}}"}} {{"{{.Email}}"}} {{"{{.Phone}}"}} {{"{{.Website}}"}} {{"{{.Address}}"}} {{"{{.Category}}"}}. Other &#123;&#123; &#125;&#125; marks make the template invalid.</p>
+                    </div>
+                    <div class="field">
+                        <label for="test_to">Send a test to</label>
+                        <input type="email" id="test_to" name="test_to" autocomplete="off" placeholder="you@example.com">
+                        <p class="hint">The test and the preview use this form and do not save it.</p>
+                    </div>
+                </fieldset>
+
+                <div id="mail-result" class="notice" hidden></div>
+                <div class="submit-row">
+                    <button type="submit" class="btn-primary">Save email settings</button>
+                    <button type="button" class="btn-quiet" id="mail-check">Test SMTP connection</button>
+                    <button type="button" class="btn-quiet" id="mail-preview">Preview</button>
+                    <button type="button" class="btn-quiet" id="mail-test">Send test</button>
+                </div>
+                <noscript><p class="hint">Upload, preview, and the connection test need JavaScript. You can still paste the message and save.</p></noscript>
+            </form>
+        </section>
+
+        <section class="panel" aria-labelledby="campaign-title">
+            <h2 id="preview-title">Preview</h2>
+            <p class="hint" id="preview-subject">Sample business data. Nothing is sent until you use Send test or Send emails.</p>
+            <pre id="preview-text" class="mail-preview-text" hidden></pre>
+            <iframe id="preview-frame" class="mail-preview" sandbox title="Email preview" hidden></iframe>
+
+            <div class="jobs-head">
+                <h2 id="campaign-title">{{.Campaign.Name}}</h2>
+            </div>
+
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/rename">
+                <div class="field">
+                    <label for="rename">Campaign name</label>
+                    <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
+                </div>
+                <div class="submit-row">
+                    <button type="submit" class="btn-quiet">Rename</button>
+                </div>
+            </form>
+
+            <h3>Jobs</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">Job</th>
+                            <th scope="col">Status</th>
+                            <th scope="col"><span class="visually-hidden">Actions</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Jobs}}
+                        <tr>
+                            <td data-label="Job">{{.Name}}</td>
+                            <td data-label="Status"><span class="status status-{{.Status}}">{{.Status}}</span></td>
+                            <td class="actions">
+                                <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/remove">
+                                    <input type="hidden" name="job_id" value="{{.ID}}">
+                                    <button type="submit" class="btn-quiet">Remove</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr class="empty-row"><td colspan="3">No jobs in this campaign yet.</td></tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            {{if .Available}}
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/jobs">
+                <div class="field">
+                    <label for="job_id">Add an existing job</label>
+                    <select id="job_id" name="job_id">
+                        {{range .Available}}
+                        <option value="{{.ID}}">{{.Name}}{{if .CampaignName}} (moves from {{.CampaignName}}){{end}}</option>
+                        {{end}}
+                    </select>
+                    <p class="hint">A job can belong to one campaign. Adding it here removes it from the other one.</p>
+                </div>
+                <button type="submit" class="btn-primary">Add job</button>
+            </form>
+            {{else}}
+            <p class="hint">Every job is already in this campaign, or there are no jobs yet. Create a job and choose this campaign.</p>
+            {{end}}
+
+            <h3>Dispatch</h3>
+            {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{.PreviewWarning}}</div>{{end}}
+            <p class="hint">{{.Preview.Ready}} ready, {{.Preview.AlreadySent}} already sent, {{.Preview.MissingResults}} jobs with no results file. Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, 10 at a time, with a pause between messages and a longer pause between batches.</p>
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
+                <label class="check" for="resend">
+                    <input type="checkbox" id="resend" name="resend">
+                    <span>Send again to addresses that already received this campaign</span>
+                </label>
+                <div class="submit-row">
+                    <button type="submit" class="btn-primary" {{if .Running}}disabled{{end}}>{{if .Running}}Sending{{else}}Send emails{{end}}</button>
+                </div>
+            </form>
+
+            <h3>History</h3>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">Started (UTC)</th>
+                            <th scope="col">Status</th>
+                            <th scope="col">Sent</th>
+                            <th scope="col">Failed</th>
+                            <th scope="col">Skipped</th>
+                            <th scope="col">Detail</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Dispatches}}
+                        <tr>
+                            <td>{{.StartedLabel}}</td>
+                            <td>{{.Status}}</td>
+                            <td>{{.Sent}}</td>
+                            <td>{{.Failed}}</td>
+                            <td>{{.Skipped}}</td>
+                            <td>{{.Detail}}</td>
+                        </tr>
+                        {{else}}
+                        <tr class="empty-row"><td colspan="6">No dispatches yet.</td></tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" onsubmit="return confirm('Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed.');">
+                <button type="submit" class="btn-danger">Delete campaign</button>
+            </form>
+        </section>
+    </main>
+    <script>
+    (function () {
+        var form = document.getElementById("mail-form");
+        var file = document.getElementById("html_file");
+        var result = document.getElementById("mail-result");
+        var maxBytes = 500000;
+
+        if (!form) {
+            return;
+        }
+
+        file.addEventListener("change", function () {
+            var picked = file.files && file.files[0];
+            if (!picked) {
+                return;
+            }
+            if (picked.size > maxBytes) {
+                showResult("That HTML file is too long.", true);
+                file.value = "";
+                return;
+            }
+            var reader = new FileReader();
+            reader.onload = function () {
+                document.getElementById("body").value = String(reader.result || "");
+                document.getElementById("format").value = "html";
+                showResult("HTML loaded into the editor. Save to keep it.", false);
+            };
+            reader.readAsText(picked);
+        });
+
+        document.getElementById("mail-check").addEventListener("click", function () {
+            postJSON("/campaigns/" + form.dataset.id + "/mail/check", function (data) {
+                showResult(data.ok ? data.notice : data.error, !data.ok);
+            });
+        });
+
+        document.getElementById("mail-preview").addEventListener("click", function () {
+            postJSON("/campaigns/" + form.dataset.id + "/mail/preview", function (data) {
+                if (!data.ok) {
+                    showResult(data.error, true);
+                    return;
+                }
+                showResult("Preview updated.", false);
+                document.getElementById("preview-subject").textContent = "Subject: " + data.subject;
+                var frame = document.getElementById("preview-frame");
+                var text = document.getElementById("preview-text");
+                if (data.html) {
+                    text.hidden = true;
+                    text.textContent = "";
+                    frame.hidden = false;
+                    frame.srcdoc = data.body;
+                    return;
+                }
+                frame.hidden = true;
+                frame.srcdoc = "";
+                text.hidden = false;
+                text.textContent = data.body;
+            });
+        });
+
+        document.getElementById("mail-test").addEventListener("click", function () {
+            postJSON("/campaigns/" + form.dataset.id + "/mail/test", function (data) {
+                showResult(data.ok ? data.notice : data.error, !data.ok);
+            });
+        });
+
+        function postJSON(url, done) {
+            showResult("Working…", false);
+            fetch(url, {
+                method: "POST",
+                body: new FormData(form),
+                headers: {"Accept": "application/json"}
+            }).then(function (res) {
+                return res.json();
+            }).then(done).catch(function () {
+                showResult("Could not reach the server.", true);
+            });
+        }
+
+        function showResult(message, isError) {
+            result.hidden = false;
+            result.textContent = message;
+            result.className = isError ? "notice notice-error" : "notice notice-success";
+            result.setAttribute("role", isError ? "alert" : "status");
+        }
+    })();
+    </script>
+</body>
+</html>

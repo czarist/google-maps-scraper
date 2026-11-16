@@ -51,7 +51,7 @@ func (o *stealthFetch) Fetch(ctx context.Context, job scrapemate.IJob) scrapemat
 	session := azuretls.NewSessionWithContext(ctx)
 	defer session.Close()
 
-	if o.rotator != nil {
+	if o.rotator != nil && !scrapemate.SkipsProxy(job) {
 		session.InsecureSkipVerify = true
 
 		proxy := o.rotator.Next()

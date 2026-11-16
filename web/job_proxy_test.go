@@ -1,3 +1,4 @@
+//nolint:testpackage // stays with the other web package tests
 package web
 
 import (

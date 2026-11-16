@@ -4,6 +4,9 @@
 <tr>
     <td data-label="Job">
         <span class="job-name">{{.Name}}</span>
+        {{if .CampaignID}}
+        <a class="job-campaign" href="/campaigns/{{.CampaignID}}">{{.CampaignName}}</a>
+        {{end}}
         <span class="job-id" title="{{.ID}}">{{.ID}}</span>
     </td>
     <td data-label="Created (UTC)">

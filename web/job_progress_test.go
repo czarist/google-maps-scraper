@@ -1,3 +1,4 @@
+//nolint:testpackage // uses unexported helpers from package web
 package web
 
 import (

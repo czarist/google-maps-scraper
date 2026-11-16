@@ -1,10 +1,18 @@
 # Web UI + MySQL. Every job is saved as CSV in ./gmapsdata and in the
 # `places` table of the `gmaps` database.
 #
-#   docker compose -f docker-compose.mysql.yaml up -d --build
+#   docker compose -f docker-compose.mysql.yaml up -d --watch
+#
+# --watch keeps this file's develop.watch running. A code change rebuilds
+# gmaps-local and recreates the scraper. gmapsdata and MySQL are left as they are.
+# The first build after a Dockerfile change is slow. Later code changes reuse
+# the Playwright layer and only recompile the Go binary.
 #
 # Web UI: http://localhost:8080
 # MySQL:  127.0.0.1:3306, database gmaps, user gmaps, password gmaps
+# Mailpit inbox: http://127.0.0.1:8025
+#   Campaign SMTP from the scraper container: host mailpit, port 1025, encryption none.
+#   Username and password can stay empty. Mailpit also accepts any login.
 #
 # Change the passwords below before exposing this anywhere but your machine.
 services:
@@ -30,6 +38,14 @@ services:
     build: .
     image: gmaps-local
     restart: unless-stopped
+    develop:
+      watch:
+        - action: rebuild
+          path: .
+          ignore:
+            - gmapsdata/
+            - .git/
+            - docker-compose.mysql.yaml
     depends_on:
       mysql:
         condition: service_healthy
@@ -41,5 +57,20 @@ services:
     volumes:
       - ./gmapsdata:/gmapsdata
 
+  mailpit:
+    image: axllent/mailpit:v1.33.1
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
+      - "127.0.0.1:1025:1025"
+    environment:
+      MP_MAX_MESSAGES: "500"
+      MP_DATABASE: /data/mailpit.db
+      MP_SMTP_AUTH_ACCEPT_ANY: "1"
+      MP_SMTP_AUTH_ALLOW_INSECURE: "1"
+    volumes:
+      - mailpit-data:/data
+
 volumes:
   mysql-data:
+  mailpit-data:

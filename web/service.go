@@ -17,6 +17,13 @@ type Service struct {
 
 	// progress holds a live place counter (*atomic.Int64) per running job.
 	progress sync.Map
+
+	dispatchMu  sync.Mutex
+	dispatching map[string]struct{}
+
+	// dispatchSleep and dispatchWait replace the paced-send clock in tests.
+	dispatchSleep func(context.Context, time.Duration)
+	dispatchWait  func(lo, hi time.Duration) time.Duration
 }
 
 // StartProgress starts a live place counter for a job.
@@ -67,7 +74,16 @@ func (s *Service) Create(ctx context.Context, job *Job) error {
 }
 
 func (s *Service) All(ctx context.Context) ([]Job, error) {
-	return s.repo.Select(ctx, SelectParams{})
+	jobs, err := s.repo.Select(ctx, SelectParams{})
+	if err != nil {
+		return nil, err
+	}
+
+	if err := s.attachCampaigns(ctx, jobs); err != nil {
+		return nil, err
+	}
+
+	return jobs, nil
 }
 
 // ListJobs returns a page of jobs, clamping invalid page and limit values.
@@ -115,6 +131,10 @@ func (s *Service) ListJobs(ctx context.Context, page, limit int) (JobPage, error
 		if n, ok := s.Progress(jobs[i].ID); ok {
 			jobs[i].Data.Run.Places = n
 		}
+	}
+
+	if err := s.attachCampaigns(ctx, jobs); err != nil {
+		return ans, err
 	}
 
 	running, err := s.countJobs(ctx, SelectParams{Status: StatusWorking})

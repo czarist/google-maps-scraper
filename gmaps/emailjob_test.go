@@ -6,7 +6,23 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/gosom/scrapemate"
 )
+
+func TestEmailExtractJobSkipsProxy(t *testing.T) {
+	job := NewEmailJob("parent", &Entry{WebSite: "https://example.com"})
+	if !scrapemate.SkipsProxy(job) {
+		t.Fatal("email extraction must skip the proxy")
+	}
+
+	if scrapemate.SkipsProxy(&SearchJob{}) {
+		t.Fatal("search must keep the proxy")
+	}
+
+	if scrapemate.SkipsProxy(&PlaceJob{}) {
+		t.Fatal("place page must keep the proxy")
+	}
+}
 
 func TestCleanEmail(t *testing.T) {
 	valid := []struct {

@@ -72,6 +72,10 @@ type Job struct {
 	Date   time.Time
 	Status string
 	Data   JobData
+	// CampaignID and CampaignName are filled for display. They are not stored
+	// in the job JSON.
+	CampaignID   string
+	CampaignName string
 }
 
 func (j *Job) Validate() error {
@@ -123,22 +127,16 @@ type JobRun struct {
 }
 
 // Started reports whether the job has begun running.
-//
-//nolint:gocritic // value receiver keeps the method callable from templates.
 func (r JobRun) Started() bool {
 	return !r.StartedAt.IsZero()
 }
 
 // StartedAtISO is the start time in RFC 3339, for the live timer in the page.
-//
-//nolint:gocritic // value receiver keeps the method callable from templates.
 func (r JobRun) StartedAtISO() string {
 	return r.StartedAt.UTC().Format(time.RFC3339)
 }
 
 // Took is how long a finished run lasted, such as "3m 12s".
-//
-//nolint:gocritic // value receiver keeps the method callable from templates.
 func (r JobRun) Took() string {
 	if r.StartedAt.IsZero() || r.FinishedAt.IsZero() {
 		return ""

@@ -26,18 +26,21 @@ var static embed.FS
 const (
 	jobsPageLimit           = 20
 	methodNotAllowedMessage = "Method not allowed"
+	formChecked             = "on"
 )
 
 type Server struct {
-	tmpl map[string]*template.Template
-	srv  *http.Server
-	svc  *Service
+	tmpl     map[string]*template.Template
+	srv      *http.Server
+	svc      *Service
+	sendMail MailSender
 }
 
 func New(svc *Service, addr string) (*Server, error) {
 	ans := Server{
-		svc:  svc,
-		tmpl: make(map[string]*template.Template),
+		svc:      svc,
+		sendMail: SendSMTP,
+		tmpl:     make(map[string]*template.Template),
 		srv: &http.Server{
 			Addr:              addr,
 			ReadHeaderTimeout: 10 * time.Second,
@@ -69,6 +72,17 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.delete(w, r)
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
+	mux.HandleFunc("/campaigns", ans.campaigns)
+	mux.HandleFunc("/campaigns/{id}", ans.campaign)
+	mux.HandleFunc("/campaigns/{id}/rename", ans.campaignRename)
+	mux.HandleFunc("/campaigns/{id}/delete", ans.campaignDelete)
+	mux.HandleFunc("/campaigns/{id}/jobs", ans.campaignAssign)
+	mux.HandleFunc("/campaigns/{id}/jobs/remove", ans.campaignUnassign)
+	mux.HandleFunc("/campaigns/{id}/mail", ans.campaignMail)
+	mux.HandleFunc("/campaigns/{id}/mail/test", ans.campaignMailTest)
+	mux.HandleFunc("/campaigns/{id}/mail/check", ans.campaignMailCheck)
+	mux.HandleFunc("/campaigns/{id}/mail/preview", ans.campaignMailPreview)
+	mux.HandleFunc("/campaigns/{id}/dispatch", ans.campaignDispatch)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 
@@ -138,6 +152,8 @@ func New(svc *Service, addr string) (*Server, error) {
 		"static/templates/job_row.html",
 		"static/templates/job_view.html",
 		"static/templates/redoc.html",
+		"static/templates/campaigns.html",
+		"static/templates/campaign.html",
 	}
 
 	for _, key := range tmplsKeys {
@@ -180,18 +196,19 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 type formData struct {
-	Name     string
-	MaxTime  string
-	Keywords []string
-	Language string
-	Zoom     int
-	FastMode bool
-	Radius   int
-	Lat      string
-	Lon      string
-	Depth    int
-	Email    bool
-	Proxies  []string
+	Name      string
+	MaxTime   string
+	Keywords  []string
+	Language  string
+	Zoom      int
+	FastMode  bool
+	Radius    int
+	Lat       string
+	Lon       string
+	Depth     int
+	Email     bool
+	Proxies   []string
+	Campaigns []CampaignSummary
 }
 
 type ctxKey string
@@ -253,7 +270,14 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Lat:      "0",
 		Lon:      "0",
 		Depth:    10,
-		Email:    false,
+		Email:    true,
+	}
+
+	campaigns, err := s.svc.ListCampaigns(r.Context())
+	if err != nil {
+		log.Printf("list campaigns: %v", err)
+	} else {
+		data.Campaigns = campaigns
 	}
 
 	_ = tmpl.Execute(w, data)
@@ -271,6 +295,21 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
+	}
+
+	campaignID, err := optionalCampaignID(r.Form.Get("campaign_id"))
+	if err != nil {
+		http.Error(w, "invalid campaign", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if campaignID != "" {
+		if _, err := s.svc.GetCampaign(r.Context(), campaignID); err != nil {
+			http.Error(w, publicErr(err), http.StatusUnprocessableEntity)
+
+			return
+		}
 	}
 
 	newJob := Job{
@@ -324,7 +363,7 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if r.Form.Get("fastmode") == "on" {
+	if r.Form.Get("fastmode") == formChecked {
 		newJob.Data.FastMode = true
 	}
 
@@ -345,7 +384,7 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	newJob.Data.Email = r.Form.Get("email") == "on"
+	newJob.Data.Email = r.Form.Get("email") == formChecked
 
 	proxies := strings.Split(r.Form.Get("proxies"), "\n")
 	if len(proxies) > 0 {
@@ -371,6 +410,14 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
+	}
+
+	if campaignID != "" {
+		if err := s.svc.AssignJob(r.Context(), campaignID, newJob.ID); err != nil {
+			http.Error(w, publicErr(err), http.StatusInternalServerError)
+
+			return
+		}
 	}
 
 	if err := s.renderJobsPage(r.Context(), w, 1); err != nil {

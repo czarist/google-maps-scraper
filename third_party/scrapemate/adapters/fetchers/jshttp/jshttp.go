@@ -3,6 +3,7 @@ package jshttp
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/mxschmitt/playwright-go"
@@ -150,6 +151,9 @@ type jsFetch struct {
 
 	rotator            scrapemate.ProxyRotator
 	maxPagesPerBrowser int
+
+	directMu sync.Mutex
+	direct   *browser
 }
 
 func (o *jsFetch) getSlot(ctx context.Context) (*sessionSlot, error) {
@@ -182,6 +186,15 @@ func (o *jsFetch) Close() error {
 		}
 	}
 
+	o.directMu.Lock()
+
+	if o.direct != nil {
+		o.direct.Close()
+		o.direct = nil
+	}
+
+	o.directMu.Unlock()
+
 	_ = o.pw.Stop()
 
 	return nil
@@ -189,6 +202,10 @@ func (o *jsFetch) Close() error {
 
 // Fetch fetches the url specicied by the job and returns the response
 func (o *jsFetch) Fetch(ctx context.Context, job scrapemate.IJob) scrapemate.Response {
+	if scrapemate.SkipsProxy(job) {
+		return o.fetchWithoutProxy(ctx, job)
+	}
+
 	if o.maxPagesPerBrowser > 1 {
 		return o.fetchWithPageSlot(ctx, job)
 	}
@@ -233,6 +250,54 @@ func (o *jsFetch) Fetch(ctx context.Context, job scrapemate.IJob) scrapemate.Res
 	}
 
 	return resp
+}
+
+// fetchWithoutProxy loads a job in a browser context that has no proxy.
+// The proxied pool stays reserved for Google search.
+func (o *jsFetch) fetchWithoutProxy(ctx context.Context, job scrapemate.IJob) scrapemate.Response {
+	if job.GetTimeout() > 0 {
+		var cancel context.CancelFunc
+
+		ctx, cancel = context.WithTimeout(ctx, job.GetTimeout())
+
+		defer cancel()
+	}
+
+	b, err := o.directBrowser()
+	if err != nil {
+		return scrapemate.Response{Error: err}
+	}
+
+	page, err := b.ctx.NewPage()
+	if err != nil {
+		return scrapemate.Response{Error: err}
+	}
+
+	defer closeWithTimeout(func() error { return page.Close() }, closeTimeout)
+
+	if job.GetTimeout() > 0 {
+		page.SetDefaultTimeout(float64(job.GetTimeout().Milliseconds()))
+	}
+
+	return runBrowserActions(ctx, job, playwrightadapter.NewPage(page))
+}
+
+func (o *jsFetch) directBrowser() (*browser, error) {
+	o.directMu.Lock()
+	defer o.directMu.Unlock()
+
+	if o.direct != nil {
+		return o.direct, nil
+	}
+
+	b, err := newBrowser(o.pw, o.headless, o.disableImages, nil, o.ua)
+	if err != nil {
+		return nil, err
+	}
+
+	o.direct = b
+
+	return b, nil
 }
 
 func (o *jsFetch) fetchWithPageSlot(ctx context.Context, job scrapemate.IJob) scrapemate.Response {
