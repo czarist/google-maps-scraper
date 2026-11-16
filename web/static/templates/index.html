@@ -9,6 +9,9 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <link rel="stylesheet" href="/static/css/main.css">
+    <!-- job_rows.html returns a <tbody> plus an out-of-band <div>. htmx 1.x only parses that
+         correctly with template fragments on; without it the swap drops #job-tbody. -->
+    <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body>
