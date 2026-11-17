@@ -8,9 +8,9 @@
 # The first build after a Dockerfile change is slow. Later code changes reuse
 # the Playwright layer and only recompile the Go binary.
 #
-# Web UI: http://localhost:8080
+# Web UI: http://localhost:8081
 # MySQL:  127.0.0.1:3306, database gmaps, user gmaps, password gmaps
-# Mailpit inbox: http://127.0.0.1:8025
+# Mailpit inbox: http://127.0.0.1:8026
 #   Campaign SMTP from the scraper container: host mailpit, port 1025, encryption none.
 #   Username and password can stay empty. Mailpit also accepts any login.
 #
@@ -53,7 +53,7 @@ services:
       MYSQL_DSN: "gmaps:gmaps@tcp(mysql:3306)/gmaps?parseTime=true&charset=utf8mb4"
     command: ["-data-folder", "/gmapsdata"]
     ports:
-      - "8080:8080"
+      - "8081:8081"
     volumes:
       - ./gmapsdata:/gmapsdata
 
@@ -61,8 +61,8 @@ services:
     image: axllent/mailpit:v1.33.1
     restart: unless-stopped
     ports:
-      - "127.0.0.1:8025:8025"
-      - "127.0.0.1:1025:1025"
+      - "127.0.0.1:8026:8025"
+      - "127.0.0.1:1026:1025"
     environment:
       MP_MAX_MESSAGES: "500"
       MP_DATABASE: /data/mailpit.db
