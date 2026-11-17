@@ -70,3 +70,37 @@ func TestProcessDropsFarPlaces(t *testing.T) {
 		t.Fatalf("kept %v, want Porto Alegre, Canoas and the place without coordinates", got)
 	}
 }
+
+func TestAppStateCenter(t *testing.T) {
+	body := `<script>window.APP_INITIALIZATION_STATE=[[[53194.7,-51.2287,-30.0277],[0,0,0]]]</script>`
+
+	c, ok := appStateCenter(body)
+	if !ok || c.Lat != -30.0277 || c.Lon != -51.2287 {
+		t.Fatalf("appStateCenter = %+v, %v", c, ok)
+	}
+}
+
+func TestProcessFallsBackToMedianCenter(t *testing.T) {
+	html := `<div role="feed">` +
+		`<div jsaction="x"><a href="` + poaPlace + `"></a></div>` +
+		`<div jsaction="x"><a href="` + canoas + `"></a></div>` +
+		`<div jsaction="x"><a href="` + poaPlace + `?2"></a></div>` +
+		`<div jsaction="x"><a href="` + salvador + `"></a></div>` +
+		`</div>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := NewGmapJob("", "pt", "escolas porto alegre", 1, false, "", 0, WithMaxDistance(50000))
+
+	_, next, err := job.Process(context.Background(), &scrapemate.Response{URL: job.URL, Document: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(next) != 3 {
+		t.Fatalf("kept %d places, want 3 (Salvador dropped)", len(next))
+	}
+}

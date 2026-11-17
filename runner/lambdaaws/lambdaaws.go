@@ -86,10 +86,11 @@ func (l *lambdaAwsRunner) handler(ctx context.Context, input lInput) error {
 		false,
 		"",
 		0,
-		10000, // TODO support radius
+		runner.DefaultRadiusMeters,
 		nil,
 		exitMonitor,
 		input.ExtraReviews,
+		runner.WithMaxDistance(runner.DefaultRadiusMeters),
 	)
 	if err != nil {
 		return err

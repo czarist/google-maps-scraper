@@ -111,13 +111,14 @@ func (j *GmapJob) searchCenter(resp *scrapemate.Response) (latLon, bool) {
 		return j.center, true
 	}
 
-	if c, ok := resp.Meta[searchCenterMetaKey].(latLon); ok {
+	u, _ := resp.Meta[searchURLMetaKey].(string)
+	if c, ok := viewportCenter(u); ok {
 		return c, true
 	}
 
-	u, _ := resp.Meta[searchURLMetaKey].(string)
+	c, ok := resp.Meta[searchCenterMetaKey].(latLon)
 
-	return viewportCenter(u)
+	return c, ok
 }
 
 func WithDeduper(d deduper.Deduper) GmapJobOptions {
@@ -200,6 +201,14 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 		next = append(next, placeJob)
 	} else {
 		center, filterByDistance := j.searchCenter(resp)
+		if !filterByDistance && j.MaxDistance > 0 {
+			// Last resort: the median of the results. A few far places cannot move it.
+			center, filterByDistance = medianCenter(feedPlaceCoords(doc))
+			if filterByDistance {
+				log.Info("search center taken from the median of the results")
+			}
+		}
+
 		filterByDistance = filterByDistance && j.MaxDistance > 0
 		tooFar := 0
 
@@ -207,7 +216,7 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 			log.Info(fmt.Sprintf("search center unknown, distance filter skipped (url %v)", resp.Meta[searchURLMetaKey]))
 		}
 
-		doc.Find(`div[role=feed] div[jsaction]>a`).Each(func(_ int, s *goquery.Selection) {
+		doc.Find(feedLinkSelector).Each(func(_ int, s *goquery.Selection) {
 			if href := s.AttrOr("href", ""); href != "" {
 				if filterByDistance {
 					if p, ok := placeCoords(href); ok && distanceMeters(center, p) > j.MaxDistance {
@@ -323,6 +332,10 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 	if err != nil {
 		resp.Error = err
 		return resp
+	}
+
+	if center, ok := appStateCenter(body); ok {
+		resp.Meta[searchCenterMetaKey] = center
 	}
 
 	resp.Body = []byte(body)

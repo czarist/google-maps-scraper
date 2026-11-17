@@ -3,6 +3,7 @@ package filerunner
 import (
 	"context"
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -170,7 +171,7 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 			dedup,
 			exitMonitor,
 			r.cfg.ExtraReviews,
-			seedOpts...,
+			append(seedOpts, runner.WithMaxDistance(r.cfg.Radius))...,
 		)
 	}
 
@@ -192,22 +193,30 @@ func (r *fileRunner) Run(ctx context.Context) (err error) {
 	return err
 }
 
+// Close releases the app, the input file and the results file. It is safe to
+// call more than once.
 func (r *fileRunner) Close(context.Context) error {
+	var errs []error
+
 	if r.app != nil {
-		return r.app.Close()
+		errs = append(errs, r.app.Close())
+		r.app = nil
 	}
 
-	if r.input != nil {
+	if r.input != nil && r.input != io.Reader(os.Stdin) {
 		if closer, ok := r.input.(io.Closer); ok {
-			return closer.Close()
+			errs = append(errs, closer.Close())
 		}
 	}
 
+	r.input = nil
+
 	if r.outfile != nil {
-		return r.outfile.Close()
+		errs = append(errs, r.outfile.Close())
+		r.outfile = nil
 	}
 
-	return nil
+	return errors.Join(errs...)
 }
 
 func (r *fileRunner) seedJobOptions() []runner.SeedJobOption {

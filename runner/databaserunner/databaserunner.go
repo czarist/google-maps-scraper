@@ -154,6 +154,7 @@ func (d *dbrunner) produceSeedJobs(ctx context.Context) error {
 		nil,
 		nil,
 		d.cfg.ExtraReviews,
+		runner.WithMaxDistance(d.cfg.Radius),
 	)
 	if err != nil {
 		return err

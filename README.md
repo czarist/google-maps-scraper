@@ -448,7 +448,7 @@ Location Settings:
   -lang string       Language code, e.g., 'de' for German (default: "en")
   -geo string        Coordinates for search, e.g., '37.7749,-122.4194'
   -zoom int          Zoom level 0-21 (default: 15)
-  -radius float      Search radius in meters (default: 10000)
+  -radius float      Search radius in meters. Places farther than this from the searched area are dropped (default: 50000)
   -grid-bbox string  Bounding box for grid scraping, format: "minLat,minLon,maxLat,maxLon"
   -grid-cell float   Grid cell size in km (default: 1.0, used with -grid-bbox)
   -grid-strict       Keep only places whose coordinates are inside -grid-bbox
@@ -569,7 +569,7 @@ Notes:
 - `-grid-bbox` guides where searches are launched from, but results are not strictly clipped to the box.
 - Add `-grid-strict` to keep only places whose coordinates fall inside the box, including its edges. This applies to all output formats. Places outside the box are still fetched before filtering.
 - When resuming, keep the same bounding box and strict-mode setting; use a fresh results file if you change either.
-- For strict distance filtering, use `-fast-mode` with `-geo` + `-radius` (or post-filter by latitude/longitude).
+- Results farther than `-radius` from the searched area are dropped. The center is `-geo` when set, otherwise the area Google shows for the query. Use `-radius 0` to keep every result.
 
 ---
 

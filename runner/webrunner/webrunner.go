@@ -204,7 +204,7 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 
 	radius := float64(job.Data.Radius)
 	if radius <= 0 {
-		radius = defaultRadiusMeters
+		radius = runner.DefaultRadiusMeters
 	}
 
 	dedup := deduper.New()

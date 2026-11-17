@@ -26,6 +26,10 @@ type seedJobConfig struct {
 	maxDistance           float64
 }
 
+// DefaultRadiusMeters covers a city and its neighbors while dropping results
+// from other regions.
+const DefaultRadiusMeters = 50000
+
 // SeedJobOption configures seed job creation.
 type SeedJobOption func(*seedJobConfig)
 
