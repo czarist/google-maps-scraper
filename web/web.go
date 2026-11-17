@@ -145,7 +145,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.download(w, r)
 	})
 
-	handler := securityHeaders(withLang(mux))
+	handler := securityHeaders(withLang(pushBoostedURL(mux)))
 	ans.srv.Handler = handler
 
 	tmplsKeys := []string{
@@ -447,7 +447,6 @@ func (s *Server) renderJobGroups(r *http.Request, w io.Writer, newJobID string) 
 	return nil
 }
 
-
 func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
@@ -744,6 +743,19 @@ func securityHeaders(next http.Handler) http.Handler {
 				"img-src 'self' data: cdn.redoc.ly cdnjs.cloudflare.com *.tile.openstreetmap.org; "+
 				"font-src 'self' fonts.gstatic.com; "+
 				"connect-src 'self'")
+
+		next.ServeHTTP(w, r)
+	})
+}
+
+// pushBoostedURL tells htmx which URL a boosted navigation ended on. A boosted
+// form that redirects is followed by the browser, and without this header the
+// address bar would keep the form's action instead of the page shown.
+func pushBoostedURL(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.Header.Get("HX-Boosted") == "true" {
+			w.Header().Set("HX-Push-Url", r.URL.RequestURI())
+		}
 
 		next.ServeHTTP(w, r)
 	})

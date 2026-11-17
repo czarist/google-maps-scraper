@@ -14,7 +14,7 @@
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
-<body>
+<body hx-boost="true">
     <a class="skip-link" href="#name">{{t "Skip to the form"}}</a>
 
     <header class="topbar">
@@ -28,8 +28,8 @@
         <nav class="topnav" aria-label="{{t "Sections"}}">
             <a href="/" aria-current="page">{{t "Jobs"}}</a>
             <a href="/campaigns">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer">{{t "API documentation"}}</a>
-            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer" hx-boost="false">
                 <svg height="14" width="14" viewBox="0 0 16 16" aria-hidden="true">
                     <path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/>
                 </svg>
@@ -203,7 +203,7 @@
 
             <aside id="sponsor-section" class="sponsor" aria-label="{{t "Support the project"}}">
                 <p>{{t "This project is maintained through sponsorships. If it helps your work, consider supporting it."}}</p>
-                <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer">{{t "Sponsor on GitHub"}}</a>
+                <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "Sponsor on GitHub"}}</a>
                 <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="{{t "Dismiss sponsor note"}}">&times;</button>
             </aside>
         </section>
@@ -429,9 +429,11 @@ function hideSponsor() {
 })();
 
 // Live job activity: summary, elapsed timers and time-limit bars.
+// Pages are swapped in place (hx-boost), so this script can run again; set it up once per tab.
 (function () {
-    var summary = document.getElementById('jobs-summary');
-    var baseTitle = document.title;
+    if (window.__gmsLiveInit) return;
+    window.__gmsLiveInit = true;
+
     var clockOffset = 0; // server time minus browser time, in ms
     var lastCounts = {};
 
@@ -468,6 +470,10 @@ function hideSponsor() {
     }
 
     function syncFromList(tbody) {
+        var summary = document.getElementById('jobs-summary');
+        var baseTitle = document.title.replace(/^\(\d+ [^)]*\) /, '');
+        if (!summary) return;
+
         var serverNow = Date.parse(tbody.getAttribute('data-server-now'));
         if (!isNaN(serverNow)) clockOffset = serverNow - Date.now();
 
@@ -528,11 +534,6 @@ function hideSponsor() {
         var saved = readOpen();
         saved[d.getAttribute('data-group')] = d.open;
         try { localStorage.setItem(openKey, JSON.stringify(saved)); } catch (err) {}
-    }, true);
-
-    // A click on "Configure" inside a summary opens the page without toggling the accordion.
-    document.addEventListener('click', function (e) {
-        if (e.target.closest && e.target.closest('summary .group-config')) e.stopPropagation();
     }, true);
 
     document.body.addEventListener('htmx:load', function (e) {

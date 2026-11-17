@@ -46,6 +46,11 @@ services:
             - gmapsdata/
             - .git/
             - docker-compose.mysql.yaml
+            - tmp_e2e/
+            - "**/*_test.go"
+            - "**/*.md"
+            - .claude/
+            - .mcp.json
     depends_on:
       mysql:
         condition: service_healthy

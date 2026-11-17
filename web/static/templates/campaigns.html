@@ -10,8 +10,10 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
+    <meta name="htmx-config" content='{"useTemplateFragments":true}'>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
-<body>
+<body hx-boost="true">
     <a class="skip-link" href="#campaign-name">{{t "Skip to the form"}}</a>
 
     <header class="topbar">
@@ -25,8 +27,8 @@
         <nav class="topnav" aria-label="{{t "Sections"}}">
             <a href="/">{{t "Jobs"}}</a>
             <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer">{{t "API documentation"}}</a>
-            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">{{t "Star on GitHub"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "Star on GitHub"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
                 <span class="theme-label-dark">{{t "Dark mode"}}</span>
                 <span class="theme-label-light">{{t "Light mode"}}</span>

@@ -84,7 +84,7 @@
                             hx-target="#map-modal-container"
                             hx-swap="innerHTML"
                             aria-label="{{t "View %s on map" .Name}}">{{t "Map"}}</button>
-                    <a href="/download?id={{.ID}}" download class="btn-quiet download-button" aria-label="{{t "Download CSV for %s" .Name}}">CSV</a>
+                    <a href="/download?id={{.ID}}" download hx-boost="false" class="btn-quiet download-button" aria-label="{{t "Download CSV for %s" .Name}}">CSV</a>
                     {{end}}
                     <button hx-delete="/delete?id={{.ID}}"
                             hx-target="#job-groups"
