@@ -266,6 +266,23 @@ When running the web server, a full REST API is available:
 
 Full OpenAPI 3.0.3 documentation available at http://localhost:8081/api/docs
 
+### MCP server
+
+The web server also speaks MCP at `http://localhost:8081/mcp` (streamable HTTP), so an AI agent can drive everything the UI does:
+
+- **Jobs:** `list_jobs`, `get_job`, `create_job`, `delete_job`, `get_job_results`
+- **Proxies:** `list_proxies`, `add_proxies`, `remove_proxies`, `set_proxies`, `test_proxies`. The saved pool is used by new jobs and prefilled in the web form.
+- **Campaigns:** `list_campaigns`, `get_campaign`, `create_campaign`, `rename_campaign`, `delete_campaign`, `add_job_to_campaign`, `remove_job_from_campaign`
+- **Campaign email:** `configure_campaign_email`, `test_campaign_smtp`, `preview_campaign_email`, `send_test_email`, `start_campaign_dispatch`
+
+Add it to Claude Code with:
+
+```bash
+claude mcp add --transport http google-maps-scraper http://localhost:8081/mcp
+```
+
+The endpoint has no authentication, like the rest of the web UI. Do not expose port 8081 beyond your machine.
+
 ### SaaS Edition
 
 Need a multi-user platform with API keys, admin UI, job queue, workers, and cloud provisioning? Use the optional self-hosted SaaS edition:

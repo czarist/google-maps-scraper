@@ -90,6 +90,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.viewJob(w, r)
 	})
 	mux.HandleFunc("/", ans.index)
+	mux.Handle("/mcp", ans.mcpHandler())
 
 	// api routes
 	mux.HandleFunc("/api/docs", ans.redocHandler)
@@ -272,6 +273,12 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		log.Printf("list campaigns: %v", err)
 	} else {
 		data.Campaigns = campaigns
+	}
+
+	if saved, err := s.svc.SavedProxies(); err != nil {
+		log.Printf("saved proxies: %v", err)
+	} else {
+		data.Proxies = saved
 	}
 
 	if err := s.execTemplate(w, r, "static/templates/index.html", data); err != nil {
