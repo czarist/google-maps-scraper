@@ -35,6 +35,12 @@ type GmapJob struct {
 	ExtractExtraReviews     bool
 	WriterManagedCompletion bool
 	CompletionTracker       CompletionTracker
+
+	// MaxDistance drops places farther than this many meters from the search
+	// center. Zero keeps every place.
+	MaxDistance float64
+	center      latLon
+	hasCenter   bool
 }
 
 func NewGmapJob(
@@ -82,11 +88,36 @@ func NewGmapJob(
 		ExtractEmail: extractEmail,
 	}
 
+	job.center, job.hasCenter = parseGeoCoordinates(geoCoordinates)
+
 	for _, opt := range opts {
 		opt(&job)
 	}
 
 	return &job
+}
+
+// WithMaxDistance drops places farther than meters from the search center.
+// The center is the given coordinates, or else the area Google shows for the query.
+func WithMaxDistance(meters float64) GmapJobOptions {
+	return func(j *GmapJob) {
+		j.MaxDistance = meters
+	}
+}
+
+// searchCenter returns the point distances are measured from.
+func (j *GmapJob) searchCenter(resp *scrapemate.Response) (latLon, bool) {
+	if j.hasCenter {
+		return j.center, true
+	}
+
+	if c, ok := resp.Meta[searchCenterMetaKey].(latLon); ok {
+		return c, true
+	}
+
+	u, _ := resp.Meta[searchURLMetaKey].(string)
+
+	return viewportCenter(u)
 }
 
 func WithDeduper(d deduper.Deduper) GmapJobOptions {
@@ -168,8 +199,24 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 
 		next = append(next, placeJob)
 	} else {
+		center, filterByDistance := j.searchCenter(resp)
+		filterByDistance = filterByDistance && j.MaxDistance > 0
+		tooFar := 0
+
+		if j.MaxDistance > 0 && !filterByDistance {
+			log.Info(fmt.Sprintf("search center unknown, distance filter skipped (url %v)", resp.Meta[searchURLMetaKey]))
+		}
+
 		doc.Find(`div[role=feed] div[jsaction]>a`).Each(func(_ int, s *goquery.Selection) {
 			if href := s.AttrOr("href", ""); href != "" {
+				if filterByDistance {
+					if p, ok := placeCoords(href); ok && distanceMeters(center, p) > j.MaxDistance {
+						tooFar++
+
+						return
+					}
+				}
+
 				jopts := []PlaceJobOptions{}
 				if j.ExitMonitor != nil {
 					jopts = append(jopts, WithPlaceJobExitMonitor(j.ExitMonitor))
@@ -186,6 +233,10 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 				}
 			}
 		})
+
+		if tooFar > 0 {
+			log.Info(fmt.Sprintf("%d places dropped, farther than %.0f m from the search center", tooFar, j.MaxDistance))
+		}
 	}
 
 	if j.ExitMonitor != nil {
@@ -264,6 +315,9 @@ func (j *GmapJob) BrowserActions(ctx context.Context, page scrapemate.BrowserPag
 
 		return resp
 	}
+
+	// After the results load, the URL holds the area Google picked for the query.
+	resp.Meta = map[string]any{searchURLMetaKey: page.URL()}
 
 	body, err := page.Content()
 	if err != nil {

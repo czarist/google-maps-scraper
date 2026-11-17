@@ -260,7 +260,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		Language: resultsLanguage(langFrom(r.Context())),
 		Zoom:     15,
 		FastMode: false,
-		Radius:   10000,
+		Radius:   50000,
 		Lat:      "0",
 		Lon:      "0",
 		Depth:    10,

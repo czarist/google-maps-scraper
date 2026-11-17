@@ -23,6 +23,7 @@ type seedJobConfig struct {
 	completedInputSkipper func(string) bool
 	completionTracker     gmaps.CompletionTracker
 	deterministicIDs      bool
+	maxDistance           float64
 }
 
 // SeedJobOption configures seed job creation.
@@ -39,6 +40,14 @@ func WithCompletedInputSkipper(skipper func(string) bool) SeedJobOption {
 func WithCompletionTracker(tracker gmaps.CompletionTracker) SeedJobOption {
 	return func(cfg *seedJobConfig) {
 		cfg.completionTracker = tracker
+	}
+}
+
+// WithMaxDistance drops places farther than meters from the search center in
+// normal mode. Fast mode already filters by its radius.
+func WithMaxDistance(meters float64) SeedJobOption {
+	return func(cfg *seedJobConfig) {
+		cfg.maxDistance = meters
 	}
 }
 
@@ -146,6 +155,10 @@ func CreateSeedJobs(
 
 			if createCfg.completionTracker != nil {
 				opts = append(opts, gmaps.WithGmapCompletionTracker(createCfg.completionTracker))
+			}
+
+			if createCfg.maxDistance > 0 {
+				opts = append(opts, gmaps.WithMaxDistance(createCfg.maxDistance))
 			}
 
 			job = gmaps.NewGmapJob(id, langCode, query, maxDepth, email, geoCoordinates, zoom, opts...)

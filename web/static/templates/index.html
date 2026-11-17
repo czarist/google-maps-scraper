@@ -132,7 +132,8 @@
                                 </div>
                                 <div class="field">
                                     <label for="radius">{{t "Radius in meters"}}</label>
-                                    <input type="number" step="1" id="radius" name="radius" value="{{.Radius}}">
+                                    <input type="number" step="1" id="radius" name="radius" value="{{.Radius}}" aria-describedby="radius-hint">
+                                    <p class="hint" id="radius-hint">{{t "Places farther than this from the searched area are dropped."}}</p>
                                 </div>
                             </div>
                         </fieldset>

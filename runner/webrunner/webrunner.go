@@ -198,8 +198,13 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	defer mate.Close()
 
 	var coords string
-	if job.Data.Lat != "" && job.Data.Lon != "" {
+	if hasCoordinates(job.Data.Lat, job.Data.Lon) {
 		coords = job.Data.Lat + "," + job.Data.Lon
+	}
+
+	radius := float64(job.Data.Radius)
+	if radius <= 0 {
+		radius = defaultRadiusMeters
 	}
 
 	dedup := deduper.New()
@@ -213,16 +218,11 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		job.Data.Email,
 		coords,
 		job.Data.Zoom,
-		func() float64 {
-			if job.Data.Radius <= 0 {
-				return 10000 // 10 km
-			}
-
-			return float64(job.Data.Radius)
-		}(),
+		radius,
 		dedup,
 		exitMonitor,
 		w.cfg.ExtraReviews || job.Data.ExtraReviews,
+		runner.WithMaxDistance(radius),
 	)
 	if err != nil {
 		return w.finishJob(ctx, job, web.StatusFailed, err)
