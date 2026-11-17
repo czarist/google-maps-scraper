@@ -150,8 +150,7 @@ func New(svc *Service, addr string) (*Server, error) {
 
 	tmplsKeys := []string{
 		"static/templates/index.html",
-		"static/templates/job_rows.html",
-		"static/templates/job_row.html",
+		"static/templates/job_groups.html",
 		"static/templates/job_view.html",
 		"static/templates/redoc.html",
 		"static/templates/campaigns.html",
@@ -423,19 +422,21 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.renderJobsPage(r, w, 1); err != nil {
+	if err := s.renderJobGroups(r, w, newJob.ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func (s *Server) renderJobsPage(r *http.Request, w io.Writer, page int) error {
-	jobPage, err := s.svc.ListJobs(r.Context(), page, jobsPageLimit)
+// renderJobGroups writes the home page job list, grouped by campaign.
+// newJobID highlights a job that was just created.
+func (s *Server) renderJobGroups(r *http.Request, w io.Writer, newJobID string) error {
+	groups, err := s.svc.ListJobGroups(r.Context(), newJobID)
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
 
 	var output bytes.Buffer
-	if err := s.execTemplate(&output, r, "static/templates/job_rows.html", jobPage); err != nil {
+	if err := s.execTemplate(&output, r, "static/templates/job_groups.html", groups); err != nil {
 		return fmt.Errorf("render jobs: %w", err)
 	}
 
@@ -446,14 +447,6 @@ func (s *Server) renderJobsPage(r *http.Request, w io.Writer, page int) error {
 	return nil
 }
 
-func pageFromRequest(r *http.Request) int {
-	page, err := strconv.Atoi(r.URL.Query().Get("page"))
-	if err != nil || page < 1 {
-		return 1
-	}
-
-	return page
-}
 
 func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -462,7 +455,7 @@ func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.renderJobsPage(r, w, pageFromRequest(r)); err != nil {
+	if err := s.renderJobGroups(r, w, ""); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -528,7 +521,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.renderJobsPage(r, w, pageFromRequest(r)); err != nil {
+	if err := s.renderJobGroups(r, w, ""); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }

@@ -90,3 +90,22 @@ func TestIndexRendersInPortuguese(t *testing.T) {
 		}
 	}
 }
+
+func TestPTBRTranslatesDispatchProgress(t *testing.T) {
+	cases := map[string]string{
+		"Sent 20, failed 0, skipped 0. Waiting 4m56s before the next batch.": "Enviados 20, com erro 0, ignorados 0. Aguardando 4m56s antes do próximo lote.",
+		"Sent 3, failed 1, skipped 2. Waiting 48s before the next message.":  "Enviados 3, com erro 1, ignorados 2. Aguardando 48s antes da próxima mensagem.",
+		"No new email addresses. Skipped 7 already sent.":                    "Nenhum endereço novo. Ignorados 7 já enviados.",
+		"something else": "something else",
+	}
+
+	for in, want := range cases {
+		if got := translate(LangPTBR, in); got != want {
+			t.Errorf("translate(%q) = %q, want %q", in, got, want)
+		}
+
+		if got := translate(LangEN, in); got != in {
+			t.Errorf("English changed %q to %q", in, got)
+		}
+	}
+}

@@ -276,6 +276,19 @@ type DispatchPreview struct {
 }
 
 // CampaignStore persists campaigns. The SQLite job repository implements it.
+// MailLogEntry is the latest send result for one address of a campaign.
+type MailLogEntry struct {
+	Email  string
+	Status string
+	Error  string
+	SentAt time.Time
+}
+
+// SentLabel is the UTC send time for tables.
+func (e MailLogEntry) SentLabel() string {
+	return e.SentAt.UTC().Format("2006-01-02 15:04")
+}
+
 type CampaignStore interface {
 	CreateCampaign(context.Context, *Campaign) error
 	ListCampaigns(context.Context) ([]CampaignSummary, error)
@@ -290,6 +303,7 @@ type CampaignStore interface {
 	SaveMail(context.Context, string, *MailConfig) error
 	SentEmails(context.Context, string) (map[string]struct{}, error)
 	RecordMail(context.Context, string, string, string, string) error
+	MailLog(context.Context, string) ([]MailLogEntry, error)
 	InsertDispatch(context.Context, *Dispatch) error
 	UpdateDispatch(context.Context, *Dispatch) error
 	ListDispatches(context.Context, string, int) ([]Dispatch, error)

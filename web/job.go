@@ -41,6 +41,10 @@ type JobPage struct {
 	// RenderedAt is the server time, so the page timer can correct for a
 	// browser clock that is off.
 	RenderedAt time.Time
+	// Groups holds the jobs by campaign for the home page.
+	Groups []JobGroup
+	// NewJobID is the job just created, so the page can highlight it.
+	NewJobID string
 }
 
 // RenderedAtISO is RenderedAt in RFC 3339.
@@ -76,6 +80,8 @@ type Job struct {
 	// in the job JSON.
 	CampaignID   string
 	CampaignName string
+	// WithEmail counts the places in the job's CSV that have an email. Display only.
+	WithEmail int
 }
 
 func (j *Job) Validate() error {

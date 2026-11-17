@@ -1,5 +1,7 @@
 package web
 
+import "regexp"
+
 // ptBR holds the Brazilian Portuguese interface strings, keyed by the English text.
 var ptBR = map[string]string{
 	// Navigation and shared chrome
@@ -212,6 +214,38 @@ var ptBR = map[string]string{
 
 	"no places found: the search failed or was blocked (see the server log); try again, use proxies, or check the search text": "nenhum lugar encontrado: a busca falhou ou foi bloqueada (veja o log do servidor); tente de novo, use proxies ou revise o texto da busca",
 
+	// Home page accordions and campaign numbers
+	"%d emails sent": "%d emails enviados",
+	"%d failed":      "%d com erro",
+	"%d jobs":        "%d tarefas",
+	"%d places":      "%d lugares",
+	"%d queued":      "%d na fila",
+	"%d running":     "%d em execução",
+	"%d with email":  "%d com email",
+	"1 job":          "1 tarefa",
+	"Accepted means the SMTP server took the message. Bounces and inbox delivery are not tracked.": "Aceito significa que o servidor SMTP recebeu a mensagem. Devoluções (bounces) e a chegada na caixa de entrada não são rastreadas.",
+	"Accepted":           "Aceito",
+	"Campaign numbers":   "Números da campanha",
+	"Campaigns and jobs": "Campanhas e tarefas",
+	"Configure":          "Configurar",
+	"Email not set up":   "Email não configurado",
+	"Email ready":        "Email pronto",
+	"Emails by address":  "Envios por endereço",
+	"Failed addresses are tried again on the next dispatch.": "Os endereços com erro são tentados de novo no próximo envio.",
+	"No emails sent yet.": "Nenhum email enviado ainda.",
+	"No jobs in this campaign yet. Create one with the form and pick this campaign.": "Nenhuma tarefa nesta campanha ainda. Crie uma pelo formulário e escolha esta campanha.",
+	"Result":                      "Resultado",
+	"Sending emails":              "Enviando emails",
+	"When (UTC)":                  "Quando (UTC)",
+	"accepted by the SMTP server": "aceitos pelo servidor SMTP",
+	"dispatch runs":               "execuções de envio",
+	"email addresses found":       "endereços de email encontrados",
+	"failed to send":              "com erro no envio",
+	"jobs":                        "tarefas",
+	"last send %s UTC":            "último envio %s UTC",
+	"places with email":           "lugares com email",
+	"waiting to be sent":          "aguardando envio",
+
 	// Server notices and errors shown in the campaign pages
 	"Campaign renamed":                                     "Campanha renomeada",
 	"Campaign deleted. Jobs were kept.":                    "Campanha excluída. As tarefas foram mantidas.",
@@ -243,4 +277,15 @@ var ptBR = map[string]string{
 	"body is too long":                         "o corpo é longo demais",
 	"invalid from address":                     "remetente inválido",
 	"invalid email address":                    "endereço de email inválido",
+}
+
+// ptBRPatterns translates dispatch progress messages built by the service.
+var ptBRPatterns = []pattern{
+	{regexp.MustCompile(`Sent (\d+), failed (\d+), skipped (\d+)\.`), "Enviados $1, com erro $2, ignorados $3."},
+	{regexp.MustCompile(`Waiting (\S+) before the next message\.`), "Aguardando $1 antes da próxima mensagem."},
+	{regexp.MustCompile(`Waiting (\S+) before the next batch\.`), "Aguardando $1 antes do próximo lote."},
+	{regexp.MustCompile(`No new email addresses\. Skipped (\d+) already sent\.`), "Nenhum endereço novo. Ignorados $1 já enviados."},
+	{regexp.MustCompile(`No email addresses to send\. (\d+) jobs had no results file\.`), "Nenhum endereço para enviar. $1 tarefas sem arquivo de resultados."},
+	{regexp.MustCompile(`No email addresses to send\. The template failed for every row\.`), "Nenhum endereço para enviar. O modelo falhou em todas as linhas."},
+	{regexp.MustCompile(`^No email addresses to send\.$`), "Nenhum endereço para enviar."},
 }

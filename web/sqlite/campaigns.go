@@ -454,6 +454,40 @@ func (repo *repo) SentEmails(ctx context.Context, campaignID string) (map[string
 	return out, nil
 }
 
+// MailLog returns the latest send result per address, newest first.
+func (repo *repo) MailLog(ctx context.Context, campaignID string) ([]web.MailLogEntry, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT email, status, error, sent_at FROM campaign_mail_log
+		WHERE campaign_id = ?
+		ORDER BY sent_at DESC, email
+	`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var out []web.MailLogEntry
+
+	for rows.Next() {
+		var (
+			e      web.MailLogEntry
+			sentAt int64
+		)
+
+		if err := rows.Scan(&e.Email, &e.Status, &e.Error, &sentAt); err != nil {
+			return nil, err
+		}
+
+		e.SentAt = time.Unix(sentAt, 0).UTC()
+		out = append(out, e)
+	}
+
+	return out, rows.Err()
+}
+
 func (repo *repo) RecordMail(ctx context.Context, campaignID, email, status, errMsg string) error {
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO campaign_mail_log (campaign_id, email, status, error, sent_at)

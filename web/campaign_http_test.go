@@ -346,6 +346,18 @@ func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, _ st
 	return nil
 }
 
+func (m *memStore) MailLog(_ context.Context, campaignID string) ([]MailLogEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]MailLogEntry, 0, len(m.sent[campaignID]))
+	for email, status := range m.sent[campaignID] {
+		out = append(out, MailLogEntry{Email: email, Status: status})
+	}
+
+	return out, nil
+}
+
 func (m *memStore) InsertDispatch(_ context.Context, d *Dispatch) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

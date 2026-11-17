@@ -36,6 +36,7 @@ type campaignView struct {
 	Running        bool
 	RunningDetail  string
 	PreviewWarning string
+	Stats          CampaignStats
 }
 
 func (s *Server) campaigns(w http.ResponseWriter, r *http.Request) {
@@ -169,6 +170,11 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		available = append(available, all[i])
 	}
 
+	stats, err := s.svc.CampaignStats(r.Context(), id)
+	if err != nil {
+		return view, err
+	}
+
 	runningDetail := ""
 	if running && len(dispatches) > 0 {
 		runningDetail = dispatches[0].Detail
@@ -187,6 +193,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		Error:          queryMessage(r, "error"),
 		Running:        running,
 		PreviewWarning: warning,
+		Stats:          stats,
 	}
 
 	return view, nil

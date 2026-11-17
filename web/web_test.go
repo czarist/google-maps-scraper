@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 type mutableJobRepo struct {
@@ -144,7 +145,7 @@ func newTestServerWithRepo(t *testing.T, repo JobRepository) *Server {
 	return srv
 }
 
-func TestGetJobsHTMXTriggerIsPollingOnly(t *testing.T) {
+func TestGetJobsPollsAndGroupsJobs(t *testing.T) {
 	srv := newTestServerWithRepo(t, &mockJobRepo{jobs: paginatedJobs(1)})
 
 	req := httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody)
@@ -157,26 +158,25 @@ func TestGetJobsHTMXTriggerIsPollingOnly(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// The returned tbody must only poll; it must NOT contain "load" in hx-trigger
-	// because load on an outerHTML-swapped element would cause an immediate reload loop.
+	// The returned list must only poll: "load" on an outerHTML-swapped element reloads in a loop.
 	if strings.Contains(body, `hx-trigger="load`) {
-		t.Fatal("job_rows.html must not use hx-trigger=\"load\" — it causes an HTMX outerHTML reload loop")
+		t.Fatal("job_groups.html must not use hx-trigger=\"load\"")
 	}
 
-	if !strings.Contains(body, `hx-trigger="every 10s"`) {
-		t.Fatal("job_rows.html must use hx-trigger=\"every 10s\" for periodic polling")
-	}
-
-	if !strings.Contains(body, `hx-delete="/delete?id=00000000-0000-0000-0000-000000000001&page=1"`) {
-		t.Fatalf("delete request must preserve the current page: %s", body)
-	}
-
-	if !strings.Contains(body, `hx-target="#job-tbody"`) {
-		t.Fatal("delete request must replace the paginated job body")
+	for _, want := range []string{
+		`hx-trigger="every 10s"`,
+		`hx-delete="/delete?id=00000000-0000-0000-0000-000000000001"`,
+		`hx-target="#job-groups"`,
+		`data-group="none"`,
+		"No campaign",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
 	}
 }
 
-func TestIndexScrapeFormReplacesPaginatedJobs(t *testing.T) {
+func TestIndexScrapeFormReplacesJobGroups(t *testing.T) {
 	srv := newTestServer(t, t.TempDir())
 
 	req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
@@ -184,16 +184,12 @@ func TestIndexScrapeFormReplacesPaginatedJobs(t *testing.T) {
 	srv.index(rec, req)
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `hx-target="#job-tbody"`) {
-		t.Fatal("scrape form must target the paginated job body")
-	}
-
-	if !strings.Contains(body, `hx-swap="outerHTML"`) {
-		t.Fatal("scrape form must replace the paginated job body")
+	if !strings.Contains(body, `hx-target="#job-groups"`) || !strings.Contains(body, `hx-swap="outerHTML"`) {
+		t.Fatal("scrape form must replace the job groups")
 	}
 }
 
-func TestScrapeRendersFirstPageAfterCreatingJob(t *testing.T) {
+func TestScrapeHighlightsTheNewJob(t *testing.T) {
 	repo := &mutableJobRepo{mockJobRepo: mockJobRepo{jobs: paginatedJobs(20)}}
 	srv := newTestServerWithRepo(t, repo)
 
@@ -219,29 +215,22 @@ func TestScrapeRendersFirstPageAfterCreatingJob(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<tbody id="job-tbody"`) {
-		t.Fatal("scrape response must contain the complete paginated job body")
+	if !strings.Contains(body, `<div id="job-groups"`) || !strings.Contains(body, `<tr class="is-new">`) {
+		t.Fatalf("scrape response must hold the job groups with the new job marked: %s", body)
 	}
 
-	if !strings.Contains(body, "new-job") || !strings.Contains(body, "Page 1 of 2") {
-		t.Fatalf("unexpected scrape response: %s", body)
-	}
-
-	if rows := strings.Count(body, "<tr>"); rows != 20 {
-		t.Fatalf("got %d rows, want 20", rows)
+	// Every job is listed; the grouped list has no pages.
+	if rows := strings.Count(body, "<tr") - strings.Count(body, "<thead>"); rows != 21 {
+		t.Fatalf("got %d job rows, want 21", rows)
 	}
 }
 
-func TestDeleteRendersClampedCurrentPage(t *testing.T) {
-	repo := &mutableJobRepo{mockJobRepo: mockJobRepo{jobs: paginatedJobs(21)}}
+func TestDeleteRerendersJobGroups(t *testing.T) {
+	repo := &mutableJobRepo{mockJobRepo: mockJobRepo{jobs: paginatedJobs(3)}}
 	srv := newTestServerWithRepo(t, repo)
-	deletedJob := repo.jobs[20]
+	deletedJob := repo.jobs[2]
 
-	req := httptest.NewRequest(
-		http.MethodDelete,
-		"/delete?id="+deletedJob.ID+"&page=2",
-		http.NoBody,
-	)
+	req := httptest.NewRequest(http.MethodDelete, "/delete?id="+deletedJob.ID, http.NoBody)
 	req = requestWithID(req)
 	rec := httptest.NewRecorder()
 	srv.delete(rec, req)
@@ -251,16 +240,80 @@ func TestDeleteRendersClampedCurrentPage(t *testing.T) {
 	}
 
 	body := rec.Body.String()
-	if !strings.Contains(body, `<tbody id="job-tbody"`) {
-		t.Fatal("delete response must contain the complete paginated job body")
+	if !strings.Contains(body, `<div id="job-groups"`) || strings.Contains(body, deletedJob.Name) {
+		t.Fatalf("delete response must re-render the groups without %q: %s", deletedJob.Name, body)
+	}
+}
+
+func TestJobGroupsByCampaignWithEmailNumbers(t *testing.T) {
+	store := jobMemStore{newMemStore()}
+	srv := newTestServerWithRepo(t, store)
+	ctx := context.Background()
+
+	full := Campaign{ID: "11111111-1111-1111-1111-111111111111", Name: "Escolas POA"}
+	empty := Campaign{ID: "22222222-2222-2222-2222-222222222222", Name: "Vazia"}
+
+	for _, c := range []*Campaign{&full, &empty} {
+		if err := srv.svc.CreateCampaign(ctx, c); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if strings.Contains(body, deletedJob.Name) {
-		t.Fatalf("delete response still contains %q", deletedJob.Name)
+	inCampaign := Job{ID: "33333333-3333-3333-3333-333333333333", Name: "escolas", Status: StatusOK, Date: time.Now()}
+	loose := Job{ID: "44444444-4444-4444-4444-444444444444", Name: "avulsa", Status: StatusOK, Date: time.Now()}
+
+	for _, j := range []*Job{&inCampaign, &loose} {
+		if err := store.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
 	}
 
-	if rows := strings.Count(body, "<tr>"); rows != 20 {
-		t.Fatalf("got %d rows, want 20", rows)
+	if err := srv.svc.AssignJob(ctx, full.ID, inCampaign.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	csv := "title,emails\nA,a@x.com\nB,\nC,\"c@x.com, c2@x.com\"\n"
+	if err := os.WriteFile(filepath.Join(srv.svc.dataFolder, inCampaign.ID+".csv"), []byte(csv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_ = store.RecordMail(ctx, full.ID, "a@x.com", MailStatusSent, "")
+	_ = store.RecordMail(ctx, full.ID, "c@x.com", MailStatusFailed, "550 no such user")
+
+	page, err := srv.svc.ListJobGroups(ctx, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(page.Groups) != 3 || page.Groups[2].Key != noCampaignKey {
+		t.Fatalf("want 2 campaigns then the no-campaign group, got %+v", page.Groups)
+	}
+
+	g := page.Groups[0]
+	if g.Name != "Escolas POA" || len(g.Jobs) != 1 || g.WithEmail != 2 || g.Sent != 1 || g.Failed != 1 {
+		t.Fatalf("campaign group = %+v", g)
+	}
+
+	if len(page.Groups[1].Jobs) != 0 || page.Groups[2].Jobs[0].Name != "avulsa" {
+		t.Fatalf("groups = %+v", page.Groups)
+	}
+
+	stats, err := srv.svc.CampaignStats(ctx, full.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if stats.Places != 0 || stats.WithEmail != 2 || stats.Addresses != 3 || stats.Sent != 1 || stats.SendFailed != 1 {
+		t.Fatalf("stats = %+v", stats)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.getJobs(rec, httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody))
+
+	for _, want := range []string{`href="/campaigns/` + full.ID + `">Configure</a>`, "1 emails sent", "1 failed", "2 with email"} {
+		if !strings.Contains(rec.Body.String(), want) {
+			t.Fatalf("home list missing %q", want)
+		}
 	}
 }
 
@@ -273,9 +326,7 @@ func TestIndexEnablesHTMXTemplateFragments(t *testing.T) {
 
 	body := rec.Body.String()
 
-	// job_rows.html returns the <tbody> followed by an out-of-band <div>. Without template
-	// fragments htmx 1.x parses that response inside a <table>, the HTML parser hoists the
-	// <div> in front of it, and the swap replaces #job-tbody with the div's content.
+	// htmx 1.x needs template fragments to swap table markup inside the job groups reliably.
 	if !strings.Contains(body, `<meta name="htmx-config" content='{"useTemplateFragments":true}'>`) {
 		t.Fatal("index.html must enable htmx template fragments, or the job list swap drops #job-tbody")
 	}

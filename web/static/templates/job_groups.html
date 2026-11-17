@@ -1,0 +1,109 @@
+<div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="every {{if .Active}}3s{{else}}10s{{end}}" hx-swap="outerHTML"
+     data-running="{{.Running}}" data-queued="{{.Queued}}" data-server-now="{{.RenderedAtISO}}">
+{{range .Groups}}
+<details class="campaign-group{{if not .CampaignID}} campaign-group-none{{end}}" data-group="{{.Key}}" {{if .Open}}open{{end}}>
+    <summary>
+        <span class="group-chevron" aria-hidden="true"></span>
+        <span class="group-title">
+            <span class="group-name">{{if .CampaignID}}{{.Name}}{{else}}{{t "No campaign"}}{{end}}</span>
+            <span class="group-meta">
+                <span>{{if eq (len .Jobs) 1}}{{t "1 job"}}{{else}}{{t "%d jobs" (len .Jobs)}}{{end}}</span>
+                {{if .Running}}<span class="group-pill pill-running">{{t "%d running" .Running}}</span>{{end}}
+                {{if .Queued}}<span class="group-pill pill-queued">{{t "%d queued" .Queued}}</span>{{end}}
+                <span>{{t "%d places" .Places}}</span>
+                <span>{{t "%d with email" .WithEmail}}</span>
+                {{if .CampaignID}}
+                {{if or .Sent .Failed}}
+                <span class="group-pill pill-sent">{{t "%d emails sent" .Sent}}</span>
+                {{if .Failed}}<span class="group-pill pill-failed">{{t "%d failed" .Failed}}</span>{{end}}
+                {{else}}
+                <span class="group-pill {{if .MailReady}}pill-ready{{else}}pill-muted{{end}}">{{if .MailReady}}{{t "Email ready"}}{{else}}{{t "Email not set up"}}{{end}}</span>
+                {{end}}
+                {{if eq .LastStatus "running"}}<span class="group-pill pill-running">{{t "Sending emails"}}</span>{{end}}
+                {{end}}
+            </span>
+        </span>
+        {{if .CampaignID}}
+        <a class="btn-quiet group-config" href="/campaigns/{{.CampaignID}}">{{t "Configure"}}</a>
+        {{end}}
+    </summary>
+
+    {{if .Jobs}}
+    <div class="table-wrap">
+        <table class="job-table">
+            <thead>
+                <tr>
+                    <th scope="col">{{t "Job"}}</th>
+                    <th scope="col">{{t "Created (UTC)"}}</th>
+                    <th scope="col">{{t "Status"}}</th>
+                    <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
+                </tr>
+            </thead>
+            <tbody>
+            {{range .Jobs}}
+            <tr{{if eq .ID $.NewJobID}} class="is-new"{{end}}>
+                <td data-label="{{t "Job"}}">
+                    <span class="job-name">{{.Name}}</span>
+                    <span class="job-id" title="{{.ID}}">{{.ID}}</span>
+                </td>
+                <td data-label="{{t "Created (UTC)"}}" class="cell-labeled">
+                    <time datetime="{{.Date.Format "2006-01-02T15:04:05Z07:00"}}">{{.Date.Format "2006-01-02 15:04"}}</time>
+                </td>
+                <td data-label="{{t "Status"}}" class="cell-labeled">
+                    <span class="status status-{{.Status}}">{{if eq .Status "ok"}}{{t "Completed"}}{{else if eq .Status "pending"}}{{t "Queued"}}{{else if eq .Status "working"}}{{t "Running"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</span>
+                    {{if eq .Status "working"}}
+                    <div class="run" data-job="{{.ID}}" data-places="{{.Data.Run.Places}}">
+                        <p class="run-line"><strong class="run-count">{{.Data.Run.Places}}</strong> {{if eq .Data.Run.Places 1}}{{t "place found"}}{{else}}{{t "places found"}}{{end}}</p>
+                        {{if .Data.Run.Started}}
+                        <div class="budget" role="progressbar" aria-label="{{t "Time used of the %s limit" .Data.MaxTimeLabel}}"
+                             aria-valuemin="0" aria-valuemax="{{.Data.MaxSeconds}}" aria-valuenow="{{.ElapsedSeconds}}"
+                             data-started="{{.Data.Run.StartedAtISO}}" data-limit="{{.Data.MaxSeconds}}">
+                            <span class="budget-fill" style="width: {{.TimeUsedPercent}}%"></span>
+                        </div>
+                        <p class="run-line run-muted"><span role="timer" data-elapsed="{{.Data.Run.StartedAtISO}}">{{.ElapsedLabel}}</span> {{t "of %s limit" .Data.MaxTimeLabel}}</p>
+                        {{end}}
+                    </div>
+                    {{else if eq .Status "pending"}}
+                    <p class="run-line run-muted">{{if gt $.Running 0}}{{t "Starts after the running job"}}{{else}}{{t "Starting in a moment"}}{{end}}</p>
+                    {{else if and (eq .Status "ok") .Data.Run.Started}}
+                    <p class="run-line run-muted">{{if eq .Data.Run.Places 1}}{{t "%d place in %s" .Data.Run.Places .Data.Run.Took}}{{else}}{{t "%d places in %s" .Data.Run.Places .Data.Run.Took}}{{end}}</p>
+                    {{else if and (eq .Status "failed") .Data.Run.Started}}
+                    <p class="run-line run-muted">{{t "Stopped after %s" .Data.Run.Took}}{{if gt .Data.Run.Places 0}}, {{if eq .Data.Run.Places 1}}{{t "%d place saved" .Data.Run.Places}}{{else}}{{t "%d places saved" .Data.Run.Places}}{{end}}{{end}}</p>
+                    {{end}}
+                    {{if eq .Status "ok"}}
+                    <p class="run-line run-muted">{{t "%d with email" .WithEmail}}</p>
+                    {{end}}
+                    {{if and (eq .Status "failed") .Data.Run.Error}}
+                    <p class="run-line run-muted">{{t .Data.Run.Error}}</p>
+                    {{end}}
+                </td>
+                <td class="actions">
+                    {{if eq .Status "ok"}}
+                    <button type="button" class="btn-quiet view-button"
+                            hx-get="/view?id={{.ID}}"
+                            hx-target="#map-modal-container"
+                            hx-swap="innerHTML"
+                            aria-label="{{t "View %s on map" .Name}}">{{t "Map"}}</button>
+                    <a href="/download?id={{.ID}}" download class="btn-quiet download-button" aria-label="{{t "Download CSV for %s" .Name}}">CSV</a>
+                    {{end}}
+                    <button hx-delete="/delete?id={{.ID}}"
+                            hx-target="#job-groups"
+                            hx-swap="outerHTML"
+                            hx-confirm="{{t `Delete the job "%s" and its CSV? This cannot be undone.` .Name}}"
+                            type="button"
+                            class="btn-danger delete-button"
+                            aria-label="{{t "Delete %s" .Name}}">{{t "Delete"}}</button>
+                </td>
+            </tr>
+            {{end}}
+            </tbody>
+        </table>
+    </div>
+    {{else}}
+    <p class="group-empty">{{t "No jobs in this campaign yet. Create one with the form and pick this campaign."}}</p>
+    {{end}}
+</details>
+{{else}}
+<p class="group-empty">{{t "No jobs yet. Create one with the form."}}</p>
+{{end}}
+</div>

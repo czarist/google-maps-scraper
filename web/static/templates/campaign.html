@@ -144,6 +144,18 @@
                 <h2 id="campaign-title">{{.Campaign.Name}}</h2>
             </div>
 
+            <div class="stats-grid" aria-label="{{t "Campaign numbers"}}">
+                <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label">{{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label">{{t "places found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label">{{t "places with email"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label">{{t "email addresses found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label">{{t "waiting to be sent"}}</span></div>
+                <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label">{{t "accepted by the SMTP server"}}</span></div>
+                <div class="stat{{if .Stats.SendFailed}} stat-bad{{end}}"><span class="stat-value">{{.Stats.SendFailed}}</span><span class="stat-label">{{t "failed to send"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Dispatches}}</span><span class="stat-label">{{t "dispatch runs"}}{{if .Stats.LastSentLabel}} · {{t "last send %s UTC" .Stats.LastSentLabel}}{{end}}</span></div>
+            </div>
+            <p class="hint">{{t "Accepted means the SMTP server took the message. Bounces and inbox delivery are not tracked."}}</p>
+
             <form method="post" action="/campaigns/{{.Campaign.ID}}/rename">
                 <div class="field">
                     <label for="rename">{{t "Campaign name"}}</label>
@@ -234,10 +246,37 @@
                             <td>{{.Sent}}</td>
                             <td>{{.Failed}}</td>
                             <td>{{.Skipped}}</td>
-                            <td>{{t .Detail}}</td>
+                            <td class="history-detail">{{t .Detail}}</td>
                         </tr>
                         {{else}}
                         <tr class="empty-row"><td colspan="6">{{t "No dispatches yet."}}</td></tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <h3>{{t "Emails by address"}}</h3>
+            {{if .Stats.SendFailed}}<p class="hint">{{t "Failed addresses are tried again on the next dispatch."}}</p>{{end}}
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{t "Email"}}</th>
+                            <th scope="col">{{t "Result"}}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Stats.MailLog}}
+                        <tr>
+                            <td data-label="{{t "Email"}}" class="mail-address">{{.Email}}<span class="job-id">{{.SentLabel}} UTC</span></td>
+                            <td data-label="{{t "Result"}}">
+                                {{if eq .Status "sent"}}<span class="status status-ok">{{t "Accepted"}}</span>
+                                {{else}}<span class="status status-failed">{{t "Failed"}}</span>
+                                {{if .Error}}<p class="run-line mail-error">{{.Error}}</p>{{end}}{{end}}
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr class="empty-row"><td colspan="2">{{t "No emails sent yet."}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"html/template"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -101,10 +102,31 @@ func langFrom(ctx context.Context) Lang {
 func translate(lang Lang, msg string, args ...any) string {
 	if tr, ok := catalogs[lang][msg]; ok {
 		msg = tr
+	} else if len(args) == 0 {
+		msg = translatePatterns(lang, msg)
 	}
 
 	if len(args) > 0 {
 		return fmt.Sprintf(msg, args...)
+	}
+
+	return msg
+}
+
+// pattern rewrites messages built at run time, such as dispatch progress.
+type pattern struct {
+	re   *regexp.Regexp
+	repl string
+}
+
+var patternCatalogs = map[Lang][]pattern{
+	LangPTBR: ptBRPatterns,
+}
+
+// translatePatterns rewrites every known run-time fragment of msg.
+func translatePatterns(lang Lang, msg string) string {
+	for _, p := range patternCatalogs[lang] {
+		msg = p.re.ReplaceAllString(msg, p.repl)
 	}
 
 	return msg

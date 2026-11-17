@@ -13,10 +13,13 @@ import (
 	"uuid"
 )
 
+// errCampaignsUnavailable means the job repository cannot store campaigns.
+var errCampaignsUnavailable = errors.New("campaigns are not available")
+
 func (s *Service) campaignStore() (CampaignStore, error) {
 	store, ok := s.repo.(CampaignStore)
 	if !ok || store == nil {
-		return nil, errors.New("campaigns are not available")
+		return nil, errCampaignsUnavailable
 	}
 
 	return store, nil

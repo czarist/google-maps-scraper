@@ -10,8 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
-    <!-- job_rows.html returns a <tbody> plus an out-of-band <div>. htmx 1.x only parses that
-         correctly with template fragments on; without it the swap drops #job-tbody. -->
+    <!-- htmx 1.x needs template fragments to swap table markup reliably. -->
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
@@ -51,7 +50,7 @@
 
             <form id="scrape-form"
                   hx-post="/scrape"
-                  hx-target="#job-tbody"
+                  hx-target="#job-groups"
                   hx-swap="outerHTML"
                   novalidate>
 
@@ -195,23 +194,11 @@
 
         <section class="panel panel-jobs" aria-labelledby="jobs-title">
             <div class="jobs-head">
-                <h2 id="jobs-title">{{t "Jobs"}}</h2>
+                <h2 id="jobs-title">{{t "Campaigns and jobs"}}</h2>
                 <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
             </div>
-            <div class="table-wrap">
-                <table id="job-table">
-                    <thead>
-                        <tr>
-                            <th scope="col">{{t "Job"}}</th>
-                            <th scope="col">{{t "Created (UTC)"}}</th>
-                            <th scope="col">{{t "Status"}}</th>
-                            <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
-                        </tr>
-                    </thead>
-                    <tbody id="job-tbody" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
-                        <tr class="empty-row"><td colspan="4">{{t "Loading jobs…"}}</td></tr>
-                    </tbody>
-                </table>
+            <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
+                <p class="group-empty">{{t "Loading jobs…"}}</p>
             </div>
 
             <aside id="sponsor-section" class="sponsor" aria-label="{{t "Support the project"}}">
@@ -413,8 +400,9 @@ function hideSponsor() {
             var name = field('name').value.trim();
             statusBox.textContent = {{t `Job "{0}" created. It is at the top of the list.`}}.replace('{0}', name);
             // htmx 1.9 swaps before afterRequest, so the new rows are already in place.
-            var row = document.querySelector('#job-tbody tr');
-            if (row) row.classList.add('is-new');
+            // The server marks the new row and opens its campaign.
+            var row = document.querySelector('#job-groups tr.is-new');
+            if (row) row.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
             return;
         }
 
@@ -516,8 +504,40 @@ function hideSponsor() {
         tick();
     }
 
+    // Remember which campaign accordions are open across refreshes and visits.
+    var openKey = 'gms-open-groups';
+
+    function readOpen() {
+        try { return JSON.parse(localStorage.getItem(openKey) || '{}'); } catch (err) { return {}; }
+    }
+
+    function restoreOpenGroups(list) {
+        var saved = readOpen();
+        list.querySelectorAll('details[data-group]').forEach(function (d) {
+            var key = d.getAttribute('data-group');
+            // The saved choice wins, except that the group with a new job always opens.
+            if (d.querySelector('tr.is-new')) return;
+            if (saved[key] === true) d.open = true;
+            if (saved[key] === false) d.open = false;
+        });
+    }
+
+    document.addEventListener('toggle', function (e) {
+        var d = e.target;
+        if (!d.matches || !d.matches('details[data-group]')) return;
+        var saved = readOpen();
+        saved[d.getAttribute('data-group')] = d.open;
+        try { localStorage.setItem(openKey, JSON.stringify(saved)); } catch (err) {}
+    }, true);
+
+    // A click on "Configure" inside a summary opens the page without toggling the accordion.
+    document.addEventListener('click', function (e) {
+        if (e.target.closest && e.target.closest('summary .group-config')) e.stopPropagation();
+    }, true);
+
     document.body.addEventListener('htmx:load', function (e) {
-        if (e.detail && e.detail.elt && e.detail.elt.id === 'job-tbody') {
+        if (e.detail && e.detail.elt && e.detail.elt.id === 'job-groups') {
+            restoreOpenGroups(e.detail.elt);
             syncFromList(e.detail.elt);
         }
     });

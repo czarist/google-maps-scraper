@@ -818,11 +818,22 @@ type dispatchView struct {
 	Detail    string `json:"detail,omitempty"`
 }
 
+type failedEmail struct {
+	Email string `json:"email"`
+	Error string `json:"error"`
+}
+
 type campaignDetail struct {
 	ID              string         `json:"id"`
 	Name            string         `json:"name"`
 	Jobs            []jobView      `json:"jobs"`
 	Email           mailView       `json:"email"`
+	Places          int            `json:"places_found"`
+	PlacesWithEmail int            `json:"places_with_email"`
+	AddressesFound  int            `json:"email_addresses_found"`
+	EmailsAccepted  int            `json:"emails_accepted_by_smtp"`
+	EmailsFailed    int            `json:"emails_failed"`
+	FailedEmails    []failedEmail  `json:"failed_emails,omitempty"`
 	ReadyToSend     int            `json:"addresses_ready_to_send"`
 	AlreadySent     int            `json:"addresses_already_sent"`
 	JobsWithoutFile int            `json:"jobs_without_results"`
@@ -879,6 +890,15 @@ func (s *Server) campaignDetail(ctx context.Context, id string) (campaignDetail,
 			Status: dispatches[i].Status, StartedAt: dispatches[i].StartedAt.UTC().Format(time.RFC3339),
 			Sent: dispatches[i].Sent, Failed: dispatches[i].Failed, Skipped: dispatches[i].Skipped, Detail: dispatches[i].Detail,
 		})
+	}
+
+	if st, err := s.svc.CampaignStats(ctx, id); err == nil {
+		d.Places, d.PlacesWithEmail, d.AddressesFound = st.Places, st.WithEmail, st.Addresses
+		d.EmailsAccepted, d.EmailsFailed = st.Sent, st.SendFailed
+
+		for _, e := range st.FailedMails {
+			d.FailedEmails = append(d.FailedEmails, failedEmail{Email: e.Email, Error: e.Error})
+		}
 	}
 
 	if preview, err := s.svc.DispatchPreview(ctx, id); err != nil {
