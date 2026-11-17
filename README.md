@@ -239,12 +239,12 @@ mkdir -p gmapsdata
 
 docker run \
   -v "$PWD/gmapsdata:/gmapsdata" \
-  -p 8080:8080 \
+  -p 8081:8081 \
   gosom/google-maps-scraper \
   -data-folder /gmapsdata
 ```
 
-Then open http://localhost:8080 in your browser.
+Then open http://localhost:8081 in your browser.
 
 Or download the [binary release](https://github.com/gosom/google-maps-scraper/releases) for your platform.
 
@@ -264,7 +264,7 @@ When running the web server, a full REST API is available:
 | `/api/v1/jobs/{id}` | DELETE | Delete a job |
 | `/api/v1/jobs/{id}/download` | GET | Download results as CSV |
 
-Full OpenAPI 3.0.3 documentation available at http://localhost:8080/api/docs
+Full OpenAPI 3.0.3 documentation available at http://localhost:8081/api/docs
 
 ### SaaS Edition
 
@@ -455,7 +455,7 @@ Location Settings:
 
 Web Server:
   -web               Run web server mode
-  -addr string       Server address (default: ":8080")
+  -addr string       Server address (default: ":8081")
   -data-folder       Data folder for web runner (default: "webdata")
 
 Database:

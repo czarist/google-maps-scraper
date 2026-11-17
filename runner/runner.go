@@ -140,7 +140,7 @@ func ParseConfig() *Config {
 	flag.IntVar(&cfg.AwsLambdaChunkSize, "aws-lambda-chunk-size", 100, "AWS Lambda chunk size")
 	flag.BoolVar(&cfg.FastMode, "fast-mode", false, "fast mode (reduced data collection)")
 	flag.Float64Var(&cfg.Radius, "radius", 10000, "search radius in meters. Default is 10000 meters")
-	flag.StringVar(&cfg.Addr, "addr", ":8080", "address to listen on for web server")
+	flag.StringVar(&cfg.Addr, "addr", ":8081", "address to listen on for web server")
 	flag.BoolVar(&cfg.DisablePageReuse, "disable-page-reuse", false, "disable page reuse in playwright")
 	flag.BoolVar(&cfg.ExtraReviews, "extra-reviews", false, "collect anonymously available extra reviews and report collection status")
 	flag.StringVar(&cfg.LeadsDBAPIKey, "leadsdb-api-key", "", "LeadsDB API key for exporting results to LeadsDB")

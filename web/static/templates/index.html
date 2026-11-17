@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{lang}}">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -16,7 +16,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body>
-    <a class="skip-link" href="#name">Skip to the form</a>
+    <a class="skip-link" href="#name">{{t "Skip to the form"}}</a>
 
     <header class="topbar">
         <div class="brand">
@@ -26,27 +26,28 @@
             </svg>
             <span class="brand-name">Google Maps Scraper</span>
         </div>
-        <nav class="topnav" aria-label="Sections">
-            <a href="/" aria-current="page">Jobs</a>
-            <a href="/campaigns">Campaigns</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer">API documentation</a>
+        <nav class="topnav" aria-label="{{t "Sections"}}">
+            <a href="/" aria-current="page">{{t "Jobs"}}</a>
+            <a href="/campaigns">{{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer">{{t "API documentation"}}</a>
             <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer">
                 <svg height="14" width="14" viewBox="0 0 16 16" aria-hidden="true">
                     <path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25z"/>
                 </svg>
-                Star on GitHub
+                {{t "Star on GitHub"}}
             </a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
-                <span class="theme-label-dark">Dark mode</span>
-                <span class="theme-label-light">Light mode</span>
+                <span class="theme-label-dark">{{t "Dark mode"}}</span>
+                <span class="theme-label-light">{{t "Light mode"}}</span>
             </button>
+            {{langSwitch}}
         </nav>
     </header>
 
     <main class="layout">
         <section class="panel panel-form" aria-labelledby="form-title">
-            <h1 id="form-title">New job</h1>
-            <p class="lede">Each job searches Google Maps and builds a CSV of the businesses it finds.</p>
+            <h1 id="form-title">{{t "New job"}}</h1>
+            <p class="lede">{{t "Each job searches Google Maps and builds a CSV of the businesses it finds."}}</p>
 
             <form id="scrape-form"
                   hx-post="/scrape"
@@ -55,123 +56,124 @@
                   novalidate>
 
                 <div class="field">
-                    <label for="name">Job name</label>
+                    <label for="name">{{t "Job name"}}</label>
                     <input type="text" id="name" name="name" value="{{.Name}}"
                            autocomplete="off" required
-                           placeholder="Coffee shops downtown">
+                           placeholder="{{t "Coffee shops downtown"}}">
                 </div>
 
                 <div class="field">
                     <div class="field-head">
-                        <label for="keywords">Search queries</label>
-                        <span class="query-count" id="query-count">0 queries</span>
+                        <label for="keywords">{{t "Search queries"}}</label>
+                        <span class="query-count" id="query-count">{{t "0 queries"}}</span>
                     </div>
-                    <p class="hint" id="keywords-hint">Each line is a separate Google Maps search. Write what you are looking for and where.</p>
+                    <p class="hint" id="keywords-hint">{{t "Each line is a separate Google Maps search. Write what you are looking for and where."}}</p>
                     <div class="query-editor">
                         <div class="query-gutter" id="query-gutter" aria-hidden="true">1</div>
                         <textarea id="keywords" name="keywords" rows="6" wrap="off" required
                                   spellcheck="false"
                                   aria-describedby="keywords-hint keywords-examples"
-                                  placeholder="dental clinics in Chicago&#10;coffee shops in Lisbon">{{ .KeywordsString }}</textarea>
+                                  placeholder="{{t "dental clinics in Chicago"}}&#10;{{t "coffee shops in Lisbon"}}">{{ .KeywordsString }}</textarea>
                     </div>
                     <div class="examples" id="keywords-examples">
-                        <span class="examples-label">Examples:</span>
-                        <button type="button" class="chip" data-example="dental clinics in Chicago">dental clinics in Chicago</button>
-                        <button type="button" class="chip" data-example="coffee shops in Lisbon">coffee shops in Lisbon</button>
+                        <span class="examples-label">{{t "Examples:"}}</span>
+                        <button type="button" class="chip" data-example="{{t "dental clinics in Chicago"}}">{{t "dental clinics in Chicago"}}</button>
+                        <button type="button" class="chip" data-example="{{t "coffee shops in Lisbon"}}">{{t "coffee shops in Lisbon"}}</button>
                     </div>
                 </div>
 
                 <div class="field field-narrow">
-                    <label for="lang">Results language</label>
+                    <label for="lang">{{t "Results language"}}</label>
                     <input type="text" id="lang" name="lang" value="{{.Language}}"
                            list="lang-options" maxlength="2" required
                            autocomplete="off" aria-describedby="lang-hint">
                     <datalist id="lang-options">
-                        <option value="en">English</option>
-                        <option value="es">Spanish</option>
-                        <option value="de">German</option>
+                        <option value="pt">{{t "Portuguese"}}</option>
+                        <option value="en">{{t "English"}}</option>
+                        <option value="es">{{t "Spanish"}}</option>
+                        <option value="de">{{t "German"}}</option>
                     </datalist>
-                    <p class="hint" id="lang-hint">Two-letter code, such as en, es or de.</p>
+                    <p class="hint" id="lang-hint">{{t "Two-letter code, such as en, es or de."}}</p>
                 </div>
 
                 <div class="field">
-                    <label for="campaign_id">Campaign</label>
+                    <label for="campaign_id">{{t "Campaign"}}</label>
                     <select id="campaign_id" name="campaign_id">
-                        <option value="">No campaign</option>
+                        <option value="">{{t "No campaign"}}</option>
                         {{range .Campaigns}}
                         <option value="{{.ID}}">{{.Name}}</option>
                         {{end}}
                     </select>
-                    <p class="hint">Optional. Group this job under a campaign. <a href="/campaigns">Manage campaigns</a></p>
+                    <p class="hint">{{t "Optional. Group this job under a campaign."}} <a href="/campaigns">{{t "Manage campaigns"}}</a></p>
                 </div>
 
                 <details class="advanced" id="advanced">
                     <summary>
-                        <span>Advanced settings</span>
-                        <span class="advanced-state" id="advanced-state">Defaults</span>
+                        <span>{{t "Advanced settings"}}</span>
+                        <span class="advanced-state" id="advanced-state">{{t "Defaults"}}</span>
                     </summary>
 
                     <div class="advanced-body">
                         <fieldset>
-                            <legend>Search area</legend>
-                            <p class="hint">Latitude and longitude are only required in fast mode.</p>
+                            <legend>{{t "Search area"}}</legend>
+                            <p class="hint">{{t "Latitude and longitude are only required in fast mode."}}</p>
                             <div class="grid-2">
                                 <div class="field">
-                                    <label for="latitude">Latitude</label>
+                                    <label for="latitude">{{t "Latitude"}}</label>
                                     <input type="number" step="any" inputmode="decimal" id="latitude" name="latitude" value="{{.Lat}}">
                                 </div>
                                 <div class="field">
-                                    <label for="longitude">Longitude</label>
+                                    <label for="longitude">{{t "Longitude"}}</label>
                                     <input type="number" step="any" inputmode="decimal" id="longitude" name="longitude" value="{{.Lon}}">
                                 </div>
                                 <div class="field">
-                                    <label for="zoom">Zoom</label>
+                                    <label for="zoom">{{t "Zoom"}}</label>
                                     <input type="number" step="1" id="zoom" name="zoom" value="{{.Zoom}}">
                                 </div>
                                 <div class="field">
-                                    <label for="radius">Radius in meters</label>
+                                    <label for="radius">{{t "Radius in meters"}}</label>
                                     <input type="number" step="1" id="radius" name="radius" value="{{.Radius}}">
                                 </div>
                             </div>
                         </fieldset>
 
                         <fieldset>
-                            <legend>Collection</legend>
+                            <legend>{{t "Collection"}}</legend>
                             <div class="grid-2">
                                 <div class="field">
-                                    <label for="depth">Depth</label>
+                                    <label for="depth">{{t "Depth"}}</label>
                                     <input type="number" step="1" min="1" id="depth" name="depth" value="{{.Depth}}" aria-describedby="depth-hint">
-                                    <p class="hint" id="depth-hint">How many times the results list is scrolled.</p>
+                                    <p class="hint" id="depth-hint">{{t "How many times the results list is scrolled."}}</p>
                                 </div>
                                 <div class="field">
-                                    <label for="maxtime">Max job time</label>
+                                    <label for="maxtime">{{t "Max job time"}}</label>
                                     <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}" aria-describedby="maxtime-hint" autocomplete="off">
-                                    <p class="hint" id="maxtime-hint">For example 10m or 1h. Minimum 3m.</p>
+                                    <p class="hint" id="maxtime-hint">{{t "For example 10m or 1h. Minimum 3m."}}</p>
                                 </div>
                             </div>
                             <label class="check" for="fastmode">
                                 <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
                                 <span>
-                                    Fast mode (beta)
-                                    <small>Searches the area set above and returns fewer details per business.</small>
+                                    {{t "Fast mode (beta)"}}
+                                    <small>{{t "Searches the area set above and returns fewer details per business."}}</small>
                                 </span>
                             </label>
                             <label class="check" for="email">
                                 <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
                                 <span>
-                                    Collect emails
-                                    <small>Visits each business website. Jobs take longer.</small>
+                                    {{t "Collect emails"}}
+                                    <small>{{t "Visits each business website. Jobs take longer."}}</small>
                                 </span>
                             </label>
                         </fieldset>
 
                         <fieldset>
-                            <legend>Proxies</legend>
+                            <legend>{{t "Proxies"}}</legend>
                             <div class="field">
-                                <label for="proxies">One proxy per line</label>
+                                <label for="proxies">{{t "One proxy per line"}}</label>
                                 <textarea id="proxies" name="proxies" rows="4" wrap="off" spellcheck="false" aria-describedby="proxies-hint"
                                           placeholder="http://user:pass@host:port&#10;socks5://host:port">{{.ProxiesString}}</textarea>
-                                <p class="hint" id="proxies-hint">Supports http, https and socks5. Leave empty to connect directly. Proxies are used for Google search. Collecting emails from business websites stays direct.</p>
+                                <p class="hint" id="proxies-hint">{{t "Supports http, https and socks5. Leave empty to connect directly. Proxies are used for Google search. Collecting emails from business websites stays direct."}}</p>
                             </div>
                         </fieldset>
                     </div>
@@ -180,9 +182,9 @@
                 <div class="submit-row">
                     <button type="submit" class="btn-primary" id="submit-btn">
                         <span class="btn-spinner" aria-hidden="true"></span>
-                        <span class="btn-label">Create job</span>
+                        <span class="btn-label">{{t "Create job"}}</span>
                     </button>
-                    <span class="hint kbd-hint">or <kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
+                    <span class="hint kbd-hint">{{t "or"}} <kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
                 </div>
 
                 <div id="error-container" class="notice notice-error" role="alert" tabindex="-1"></div>
@@ -192,29 +194,29 @@
 
         <section class="panel panel-jobs" aria-labelledby="jobs-title">
             <div class="jobs-head">
-                <h2 id="jobs-title">Jobs</h2>
+                <h2 id="jobs-title">{{t "Jobs"}}</h2>
                 <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
             </div>
             <div class="table-wrap">
                 <table id="job-table">
                     <thead>
                         <tr>
-                            <th scope="col">Job</th>
-                            <th scope="col">Created (UTC)</th>
-                            <th scope="col">Status</th>
-                            <th scope="col"><span class="visually-hidden">Actions</span></th>
+                            <th scope="col">{{t "Job"}}</th>
+                            <th scope="col">{{t "Created (UTC)"}}</th>
+                            <th scope="col">{{t "Status"}}</th>
+                            <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
                         </tr>
                     </thead>
                     <tbody id="job-tbody" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
-                        <tr class="empty-row"><td colspan="4">Loading jobs…</td></tr>
+                        <tr class="empty-row"><td colspan="4">{{t "Loading jobs…"}}</td></tr>
                     </tbody>
                 </table>
             </div>
 
-            <aside id="sponsor-section" class="sponsor" aria-label="Support the project">
-                <p>This project is maintained through sponsorships. If it helps your work, consider supporting it.</p>
-                <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer">Sponsor on GitHub</a>
-                <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="Dismiss sponsor note">&times;</button>
+            <aside id="sponsor-section" class="sponsor" aria-label="{{t "Support the project"}}">
+                <p>{{t "This project is maintained through sponsorships. If it helps your work, consider supporting it."}}</p>
+                <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer">{{t "Sponsor on GitHub"}}</a>
+                <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="{{t "Dismiss sponsor note"}}">&times;</button>
             </aside>
         </section>
     </main>
@@ -250,25 +252,25 @@ function hideSponsor() {
 
     // Server messages (plain text) mapped to the field they refer to.
     var errorRules = [
-        [/^missing name/i, 'name', 'Give the job a name.'],
-        [/^missing keywords/i, 'keywords', 'Add at least one search query.'],
-        [/^(missing|invalid) lang/i, 'lang', 'Use a two-letter language code, such as en or es.'],
-        [/^max time must be/i, 'maxtime', 'Max job time must be at least 3m.'],
-        [/^(invalid|missing) max time/i, 'maxtime', 'Write the max job time like 10m or 1h.'],
-        [/^invalid zoom/i, 'zoom', 'Zoom must be a whole number, such as 15.'],
-        [/^invalid radius/i, 'radius', 'Radius must be a whole number of meters, such as 10000.'],
-        [/^(invalid|missing) depth/i, 'depth', 'Depth must be a whole number greater than 0.'],
-        [/^missing geo coordinates/i, 'latitude', 'Fast mode needs a latitude and longitude.'],
+        [/^missing name/i, 'name', {{t "Give the job a name."}}],
+        [/^missing keywords/i, 'keywords', {{t "Add at least one search query."}}],
+        [/^(missing|invalid) lang/i, 'lang', {{t "Use a two-letter language code, such as en or es."}}],
+        [/^max time must be/i, 'maxtime', {{t "Max job time must be at least 3m."}}],
+        [/^(invalid|missing) max time/i, 'maxtime', {{t "Write the max job time like 10m or 1h."}}],
+        [/^invalid zoom/i, 'zoom', {{t "Zoom must be a whole number, such as 15."}}],
+        [/^invalid radius/i, 'radius', {{t "Radius must be a whole number of meters, such as 10000."}}],
+        [/^(invalid|missing) depth/i, 'depth', {{t "Depth must be a whole number greater than 0."}}],
+        [/^missing geo coordinates/i, 'latitude', {{t "Fast mode needs a latitude and longitude."}}],
         [/^invalid proxy "([^"]*)"/i, 'proxies', function (m) {
-            return 'The proxy ' + m[1] + ' is not valid. Use http, https or socks5.';
+            return {{t "The proxy {0} is not valid. Use http, https or socks5."}}.replace('{0}', m[1]);
         }]
     ];
 
     // Client-side checks that mirror the server, so obvious mistakes never leave the page.
     var localRules = [
-        ['name', function (v) { return v.trim() === '' ? 'Give the job a name.' : ''; }],
-        ['keywords', function (v) { return v.trim() === '' ? 'Add at least one search query.' : ''; }],
-        ['lang', function (v) { return /^[A-Za-z]{2}$/.test(v.trim()) ? '' : 'Use a two-letter language code, such as en or es.'; }]
+        ['name', function (v) { return v.trim() === '' ? {{t "Give the job a name."}} : ''; }],
+        ['keywords', function (v) { return v.trim() === '' ? {{t "Add at least one search query."}} : ''; }],
+        ['lang', function (v) { return /^[A-Za-z]{2}$/.test(v.trim()) ? '' : {{t "Use a two-letter language code, such as en or es."}}; }]
     ];
 
     function field(id) { return document.getElementById(id); }
@@ -280,7 +282,7 @@ function hideSponsor() {
 
     function refreshAdvancedState() {
         var changed = advancedFields.filter(function (id) { return isChanged(field(id)); }).length;
-        advancedState.textContent = changed === 0 ? 'Defaults' : (changed + ' changed');
+        advancedState.textContent = changed === 0 ? {{t "Defaults"}} : {{t "{0} changed"}}.replace('{0}', changed);
         advancedState.classList.toggle('is-changed', changed > 0);
         if (changed > 0) advanced.open = true;
     }
@@ -292,7 +294,7 @@ function hideSponsor() {
         for (var i = 1; i <= Math.max(lines.length, 1); i++) numbers.push(i);
         gutter.textContent = numbers.join('\n');
         gutter.scrollTop = keywords.scrollTop;
-        queryCount.textContent = total === 1 ? '1 query' : total + ' queries';
+        queryCount.textContent = total === 1 ? {{t "1 query"}} : {{t "{0} queries"}}.replace('{0}', total);
     }
 
     function clearFieldError(el) {
@@ -339,7 +341,7 @@ function hideSponsor() {
     function setBusy(busy) {
         submitBtn.disabled = busy;
         submitBtn.setAttribute('aria-busy', busy ? 'true' : 'false');
-        submitLabel.textContent = busy ? 'Creating job…' : 'Create job';
+        submitLabel.textContent = busy ? {{t "Creating job…"}} : {{t "Create job"}};
         form.classList.toggle('is-sending', busy);
     }
 
@@ -390,7 +392,7 @@ function hideSponsor() {
         });
         if (first) {
             e.preventDefault();
-            showError('Check the highlighted field before creating the job.', first);
+            showError({{t "Check the highlighted field before creating the job."}}, first);
         }
     });
 
@@ -408,7 +410,7 @@ function hideSponsor() {
 
         if (e.detail.successful) {
             var name = field('name').value.trim();
-            statusBox.textContent = 'Job "' + name + '" created. It is at the top of the list.';
+            statusBox.textContent = {{t `Job "{0}" created. It is at the top of the list.`}}.replace('{0}', name);
             // htmx 1.9 swaps before afterRequest, so the new rows are already in place.
             var row = document.querySelector('#job-tbody tr');
             if (row) row.classList.add('is-new');
@@ -416,7 +418,7 @@ function hideSponsor() {
         }
 
         if (!xhr || xhr.status === 0) {
-            showError('Could not reach the server. Check that the scraper is running and try again.');
+            showError({{t "Could not reach the server. Check that the scraper is running and try again."}});
             return;
         }
 
@@ -426,11 +428,11 @@ function hideSponsor() {
             if (m) {
                 var msg = typeof errorRules[i][2] === 'function' ? errorRules[i][2](m) : errorRules[i][2];
                 showFieldError(errorRules[i][1], msg);
-                showError('Job not created. ' + msg, errorRules[i][1]);
+                showError({{t "Job not created."}} + ' ' + msg, errorRules[i][1]);
                 return;
             }
         }
-        showError('Job not created. Server response: ' + (raw || 'error ' + xhr.status));
+        showError({{t "Job not created. Server response:"}} + ' ' + (raw || {{t "error"}} + ' ' + xhr.status));
     });
 
     refreshQueries();
@@ -472,7 +474,7 @@ function hideSponsor() {
             bar.querySelector('.budget-fill').style.width = (used * 100).toFixed(1) + '%';
             bar.classList.toggle('is-near-limit', used >= 0.85);
             bar.setAttribute('aria-valuenow', String(Math.min(Math.floor(elapsed), limit)));
-            bar.setAttribute('aria-valuetext', formatDuration(elapsed) + ' of ' + formatDuration(limit));
+            bar.setAttribute('aria-valuetext', formatDuration(elapsed) + ' ' + {{t "of"}} + ' ' + formatDuration(limit));
         });
     }
 
@@ -484,19 +486,19 @@ function hideSponsor() {
         var queued = Number(tbody.getAttribute('data-queued')) || 0;
 
         if (running === 0 && queued === 0) {
-            summary.textContent = 'Nothing running right now.';
+            summary.textContent = {{t "Nothing running right now."}};
         } else {
             summary.innerHTML = '';
-            [[running, 'running'], [queued, 'queued']].forEach(function (pair) {
+            [[running, 'running', {{t "running"}}], [queued, 'queued', {{t "queued"}}]].forEach(function (pair) {
                 if (pair[0] === 0) return;
                 var item = document.createElement('span');
                 item.className = 'summary-item summary-' + pair[1];
-                item.textContent = pair[0] + ' ' + pair[1];
+                item.textContent = pair[0] + ' ' + pair[2];
                 summary.appendChild(item);
             });
         }
 
-        document.title = running > 0 ? '(' + running + ' running) ' + baseTitle : baseTitle;
+        document.title = running > 0 ? '(' + running + ' ' + {{t "running"}} + ') ' + baseTitle : baseTitle;
 
         // Mark counters that went up since the last refresh.
         var seen = {};

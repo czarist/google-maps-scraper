@@ -13,6 +13,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -143,7 +144,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.download(w, r)
 	})
 
-	handler := securityHeaders(mux)
+	handler := securityHeaders(withLang(mux))
 	ans.srv.Handler = handler
 
 	tmplsKeys := []string{
@@ -157,7 +158,7 @@ func New(svc *Service, addr string) (*Server, error) {
 	}
 
 	for _, key := range tmplsKeys {
-		tmp, err := template.ParseFS(static, key)
+		tmp, err := template.New(path.Base(key)).Funcs(templateFuncs(LangEN)).ParseFS(static, key)
 		if err != nil {
 			return nil, err
 		}
@@ -252,18 +253,11 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tmpl, ok := s.tmpl["static/templates/index.html"]
-	if !ok {
-		http.Error(w, "missing tpl", http.StatusInternalServerError)
-
-		return
-	}
-
 	data := formData{
 		Name:     "",
 		MaxTime:  "10m",
 		Keywords: []string{},
-		Language: "en",
+		Language: resultsLanguage(langFrom(r.Context())),
 		Zoom:     15,
 		FastMode: false,
 		Radius:   10000,
@@ -280,7 +274,9 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		data.Campaigns = campaigns
 	}
 
-	_ = tmpl.Execute(w, data)
+	if err := s.execTemplate(w, r, "static/templates/index.html", data); err != nil {
+		log.Printf("render index: %v", err)
+	}
 }
 
 func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
@@ -420,24 +416,19 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := s.renderJobsPage(r.Context(), w, 1); err != nil {
+	if err := s.renderJobsPage(r, w, 1); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
 
-func (s *Server) renderJobsPage(ctx context.Context, w io.Writer, page int) error {
-	tmpl, ok := s.tmpl["static/templates/job_rows.html"]
-	if !ok {
-		return errors.New("missing tpl")
-	}
-
-	jobPage, err := s.svc.ListJobs(ctx, page, jobsPageLimit)
+func (s *Server) renderJobsPage(r *http.Request, w io.Writer, page int) error {
+	jobPage, err := s.svc.ListJobs(r.Context(), page, jobsPageLimit)
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
 
 	var output bytes.Buffer
-	if err := tmpl.Execute(&output, jobPage); err != nil {
+	if err := s.execTemplate(&output, r, "static/templates/job_rows.html", jobPage); err != nil {
 		return fmt.Errorf("render jobs: %w", err)
 	}
 
@@ -464,7 +455,7 @@ func (s *Server) getJobs(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.renderJobsPage(r.Context(), w, pageFromRequest(r)); err != nil {
+	if err := s.renderJobsPage(r, w, pageFromRequest(r)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -530,7 +521,7 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.renderJobsPage(r.Context(), w, pageFromRequest(r)); err != nil {
+	if err := s.renderJobsPage(r, w, pageFromRequest(r)); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -690,15 +681,8 @@ func (s *Server) viewJob(w http.ResponseWriter, r *http.Request) {
 		places = []Place{}
 	}
 
-	tmpl, ok := s.tmpl["static/templates/job_view.html"]
-	if !ok {
-		http.Error(w, "missing tpl", http.StatusInternalServerError)
-
-		return
-	}
-
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, places); err != nil {
+	if err := s.execTemplate(&buf, r, "static/templates/job_view.html", places); err != nil {
 		log.Printf("view job %s: render: %v", id, err) //nolint:gosec // id is a parsed UUID and cannot contain log control characters.
 		http.Error(w, "internal server error", http.StatusInternalServerError)
 
@@ -763,4 +747,28 @@ func securityHeaders(next http.Handler) http.Handler {
 
 		next.ServeHTTP(w, r)
 	})
+}
+
+// execTemplate renders the named template in the request language.
+func (s *Server) execTemplate(w io.Writer, r *http.Request, name string, data any) error {
+	tmpl, ok := s.tmpl[name]
+	if !ok {
+		return fmt.Errorf("missing template %s", name)
+	}
+
+	localizedTmpl, err := localized(tmpl, r)
+	if err != nil {
+		return fmt.Errorf("localize %s: %w", name, err)
+	}
+
+	return localizedTmpl.Execute(w, data)
+}
+
+// resultsLanguage is the default Google Maps results language for an interface language.
+func resultsLanguage(lang Lang) string {
+	if lang == LangPTBR {
+		return "pt"
+	}
+
+	return "en"
 }

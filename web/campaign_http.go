@@ -57,7 +57,7 @@ func (s *Server) renderCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderTemplate(w, tmplCampaigns, campaignsView{
+	s.renderTemplate(w, r, tmplCampaigns, campaignsView{
 		Campaigns: items,
 		Notice:    queryMessage(r, "notice"),
 		Error:     queryMessage(r, "error"),
@@ -111,7 +111,7 @@ func (s *Server) campaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.renderTemplate(w, tmplCampaign, &view)
+	s.renderTemplate(w, r, tmplCampaign, &view)
 }
 
 func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, error) {
@@ -270,10 +270,10 @@ func (s *Server) campaignMailTest(w http.ResponseWriter, r *http.Request) {
 	if wantsMailJSON(r) {
 		s.campaignMailJSON(w, r, func(id string, cfg MailConfig) mailJSON {
 			if err := s.svc.SendTestMail(r.Context(), id, &cfg, r.Form.Get("test_to"), s.sendMail); err != nil {
-				return mailJSON{OK: false, Error: publicErr(err)}
+				return mailJSON{OK: false, Error: trFrom(r, publicErr(err))}
 			}
 
-			return mailJSON{OK: true, Notice: "Test email sent. Settings were not saved."}
+			return mailJSON{OK: true, Notice: trFrom(r, "Test email sent. Settings were not saved.")}
 		})
 
 		return
@@ -292,10 +292,10 @@ func (s *Server) campaignMailTest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) campaignMailCheck(w http.ResponseWriter, r *http.Request) {
 	s.campaignMailJSON(w, r, func(id string, cfg MailConfig) mailJSON {
 		if err := s.svc.CheckCampaignMail(r.Context(), id, &cfg); err != nil {
-			return mailJSON{OK: false, Error: publicErr(err)}
+			return mailJSON{OK: false, Error: trFrom(r, publicErr(err))}
 		}
 
-		return mailJSON{OK: true, Notice: "SMTP connection succeeded."}
+		return mailJSON{OK: true, Notice: trFrom(r, "SMTP connection succeeded.")}
 	})
 }
 
@@ -303,7 +303,7 @@ func (s *Server) campaignMailPreview(w http.ResponseWriter, r *http.Request) {
 	s.campaignMailJSON(w, r, func(id string, cfg MailConfig) mailJSON {
 		subject, body, err := s.svc.PreviewCampaignMail(r.Context(), id, &cfg)
 		if err != nil {
-			return mailJSON{OK: false, Error: publicErr(err)}
+			return mailJSON{OK: false, Error: trFrom(r, publicErr(err))}
 		}
 
 		return mailJSON{OK: true, Subject: subject, Body: body, HTML: cfg.Format == MailFormatHTML}
@@ -336,7 +336,7 @@ func (s *Server) campaignMailJSON(w http.ResponseWriter, r *http.Request, fn fun
 
 	cfg, err := mailConfigFromForm(r)
 	if err != nil {
-		writeMailJSON(w, http.StatusUnprocessableEntity, &mailJSON{Error: publicErr(err)})
+		writeMailJSON(w, http.StatusUnprocessableEntity, &mailJSON{Error: trFrom(r, publicErr(err))})
 
 		return
 	}
@@ -524,16 +524,9 @@ func queryMessage(r *http.Request, key string) string {
 	return msg
 }
 
-func (s *Server) renderTemplate(w http.ResponseWriter, name string, data any) {
-	tmpl, ok := s.tmpl[name]
-	if !ok {
-		http.Error(w, "missing tpl", http.StatusInternalServerError)
-
-		return
-	}
-
+func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, name string, data any) {
 	var buf bytes.Buffer
-	if err := tmpl.Execute(&buf, data); err != nil {
+	if err := s.execTemplate(&buf, r, name, data); err != nil {
 		log.Printf("render %s: %v", name, err)
 		http.Error(w, "could not render the page", http.StatusInternalServerError)
 

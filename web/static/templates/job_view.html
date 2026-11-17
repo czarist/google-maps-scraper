@@ -1,8 +1,8 @@
 <div id="map-modal" class="map-modal" role="dialog" aria-modal="true" aria-labelledby="map-modal-title" onclick="if(event.target===this)closeJobMap()">
     <div class="map-modal-content">
         <div class="map-modal-header">
-            <h2 id="map-modal-title">Places</h2>
-            <button type="button" class="map-modal-close" aria-label="Close map" onclick="closeJobMap()">&times;</button>
+            <h2 id="map-modal-title">{{t "Places"}}</h2>
+            <button type="button" class="map-modal-close" aria-label="{{t "Close map"}}" onclick="closeJobMap()">&times;</button>
         </div>
         <div class="map-modal-body">
             <div id="job-map"></div>
@@ -57,7 +57,7 @@
             var map = L.map('job-map');
             L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
                 maxZoom: 19,
-                attribution: '© OpenStreetMap contributors'
+                attribution: '© OpenStreetMap ' + {{t "contributors"}}
             }).addTo(map);
 
             window.__jobMap = map;
@@ -70,7 +70,7 @@
                 parts.push(escapeHtml(place.address));
             }
             if (place.link && /^https?:\/\//i.test(place.link)) {
-                parts.push('<a href="' + encodeURI(place.link) + '" target="_blank" rel="noopener noreferrer">View on Google Maps</a>');
+                parts.push('<a href="' + encodeURI(place.link) + '" target="_blank" rel="noopener noreferrer">' + escapeHtml({{t "View on Google Maps"}}) + '</a>');
             }
             return parts.join('<br>');
         }
@@ -104,7 +104,7 @@
         }
 
         function showEmptyState(map, listEl) {
-            listEl.innerHTML = '<p class="map-empty">No places with coordinates were found for this job.</p>';
+            listEl.innerHTML = '<p class="map-empty">' + escapeHtml({{t "No places with coordinates were found for this job."}}) + '</p>';
             map.setView([0, 0], 2);
         }
 
