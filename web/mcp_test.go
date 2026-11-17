@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"net/http/httptest"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -108,8 +109,8 @@ func TestMCPListsEveryTool(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		"list_jobs", "get_job", "create_job", "delete_job", "get_job_results",
-		"list_proxies", "add_proxies", "remove_proxies", "set_proxies", "test_proxies",
+		"create_job", "wait_for_job", "get_job", "list_jobs", "get_job_results", "delete_job",
+		"list_proxies", "add_proxies", "remove_proxies", "test_proxies",
 		"list_campaigns", "get_campaign", "create_campaign", "rename_campaign", "delete_campaign",
 		"add_job_to_campaign", "remove_job_from_campaign",
 		"configure_campaign_email", "test_campaign_smtp", "preview_campaign_email", "send_test_email", "start_campaign_dispatch",
@@ -128,70 +129,94 @@ func TestMCPProxyPoolFeedsNewJobs(t *testing.T) {
 		t.Fatalf("pool = %+v, want 2 unique proxies", pool)
 	}
 
-	if msg := toolError(t, s, "add_proxies", map[string]any{"proxies": []string{"ftp://nope"}}); msg == "" {
-		t.Fatal("expected invalid proxy error")
+	if msg := toolError(t, s, "add_proxies", map[string]any{"proxies": []string{"ftp://nope"}}); !strings.Contains(msg, "invalid proxy") {
+		t.Fatalf("error = %q", msg)
 	}
 
-	job := call[jobDetail](t, s, "create_job", map[string]any{"name": "escolas", "queries": []string{"escolas porto alegre"}})
-	if job.ProxyCount != 2 || job.Lang != "pt" || job.RadiusKM != 50 || !job.Emails || job.Status != StatusPending {
+	// Several searches in one string are split by line.
+	job := call[createJobOutput](t, s, "create_job", map[string]any{"name": "escolas", "searches": []string{"escolas porto alegre\nescolas canoas"}})
+	if job.Job.Proxies != 2 || job.Job.Lang != "pt" || job.Job.RadiusKM != 50 || !job.Job.CollectEmail ||
+		job.Job.MaxMinutes != 10 || len(job.Job.Searches) != 2 || !strings.Contains(job.NextStep, "wait_for_job") {
 		t.Fatalf("job defaults wrong: %+v", job)
 	}
 
-	noProxy := call[jobDetail](t, s, "create_job", map[string]any{"name": "direto", "queries": []string{"x"}, "use_saved_proxies": false})
-	if noProxy.ProxyCount != 0 {
-		t.Fatalf("use_saved_proxies=false still used %d proxies", noProxy.ProxyCount)
+	direct := call[createJobOutput](t, s, "create_job", map[string]any{"name": "direto", "searches": []string{"x"}, "use_proxies": false})
+	if direct.Job.Proxies != 0 {
+		t.Fatalf("use_proxies=false still used %d proxies", direct.Job.Proxies)
 	}
 
-	pool = call[proxiesOutput](t, s, "remove_proxies", map[string]any{"proxies": []string{"socks5://5.6.7.8:1080"}})
-	if pool.Count != 1 {
-		t.Fatalf("after remove: %+v", pool)
+	pool = call[proxiesOutput](t, s, "remove_proxies", map[string]any{"all": true})
+	if pool.Count != 0 {
+		t.Fatalf("after remove all: %+v", pool)
 	}
 
-	if msg := toolError(t, s, "create_job", map[string]any{"name": "x", "queries": []string{"x"}, "max_time": "1m"}); msg == "" {
-		t.Fatal("expected max_time error")
+	if msg := toolError(t, s, "create_job", map[string]any{"name": "x", "searches": []string{"x"}, "max_minutes": 1}); !strings.Contains(msg, "max_minutes") {
+		t.Fatalf("error = %q", msg)
+	}
+}
+
+func TestMCPFindsByNameWithHelpfulErrors(t *testing.T) {
+	s := mcpSession(t)
+
+	call[createJobOutput](t, s, "create_job", map[string]any{"name": "Escolas POA", "searches": []string{"escolas porto alegre"}})
+
+	got := call[jobOutput](t, s, "get_job", map[string]any{"job": "escolas poa"})
+	if got.Job.Name != "Escolas POA" || !strings.Contains(got.NextStep, "wait_for_job") {
+		t.Fatalf("lookup by name: %+v", got)
+	}
+
+	if msg := toolError(t, s, "get_job", map[string]any{"job": "padarias"}); !strings.Contains(msg, `"Escolas POA"`) {
+		t.Fatalf("error should list existing jobs: %q", msg)
+	}
+
+	if msg := toolError(t, s, "get_campaign", map[string]any{"campaign": "nada"}); !strings.Contains(msg, "create_campaign") {
+		t.Fatalf("error should point to create_campaign: %q", msg)
 	}
 }
 
 func TestMCPCampaignFlow(t *testing.T) {
 	s := mcpSession(t)
 
-	c := call[campaignDetail](t, s, "create_campaign", map[string]any{"name": "Escolas POA"})
-	job := call[jobDetail](t, s, "create_job", map[string]any{"name": "escolas", "queries": []string{"escolas porto alegre"}, "campaign_id": c.ID})
-
-	if job.CampaignID != c.ID {
-		t.Fatalf("job not in campaign: %+v", job)
+	job := call[createJobOutput](t, s, "create_job", map[string]any{"name": "escolas", "searches": []string{"escolas porto alegre"}, "campaign": "Escolas RS"})
+	if !job.CampaignCreated || job.Job.Campaign != "Escolas RS" {
+		t.Fatalf("campaign not created with the job: %+v", job)
 	}
 
-	mail := call[mailView](t, s, "configure_campaign_email", map[string]any{
-		"id": c.ID, "smtp_host": "mailpit", "smtp_port": 1025, "encryption": "none", "smtp_password": "x",
-		"from_email": "eu@example.com", "subject": "Olá {{.Title}}", "body": "Oi {{.Title}}",
+	// Creating a campaign that exists returns it instead of a duplicate.
+	again := call[campaignDetail](t, s, "create_campaign", map[string]any{"name": "escolas rs"})
+	if again.Warning == "" || len(again.Jobs) != 1 {
+		t.Fatalf("duplicate campaign: %+v", again)
+	}
+
+	detail := call[campaignDetail](t, s, "get_campaign", map[string]any{"campaign": "Escolas RS"})
+	if !strings.Contains(detail.NextStep, "configure_campaign_email") {
+		t.Fatalf("next step = %q", detail.NextStep)
+	}
+
+	mail := call[mailOutput](t, s, "configure_campaign_email", map[string]any{"campaign": "Escolas RS", "smtp_host": "mailpit", "smtp_port": 1025, "encryption": "NONE"})
+	if !strings.Contains(mail.NextStep, "smtp_password") || !strings.Contains(mail.NextStep, "subject") {
+		t.Fatalf("missing fields not reported: %q", mail.NextStep)
+	}
+
+	mail = call[mailOutput](t, s, "configure_campaign_email", map[string]any{
+		"campaign": "Escolas RS", "smtp_password": "x", "from_email": "eu@example.com", "subject": "Olá {{.Title}}", "body": "Oi {{.Title}}",
 	})
-	if mail.Host != "mailpit" || !mail.PasswordSet || mail.Subject != "Olá {{.Title}}" {
-		t.Fatalf("mail = %+v", mail)
-	}
-
-	// A partial update keeps the other fields and the password.
-	mail = call[mailView](t, s, "configure_campaign_email", map[string]any{"id": c.ID, "from_name": "Equipe"})
-	if mail.Host != "mailpit" || !mail.PasswordSet || mail.FromName != "Equipe" {
+	if mail.Email.Host != "mailpit" || !mail.Email.PasswordSet || strings.Contains(mail.NextStep, "missing") {
 		t.Fatalf("partial update lost fields: %+v", mail)
 	}
 
-	preview := call[previewOutput](t, s, "preview_campaign_email", map[string]any{"id": c.ID})
-	if preview.Subject == "" || preview.Subject == "Olá {{.Title}}" {
+	preview := call[previewOutput](t, s, "preview_campaign_email", map[string]any{"campaign": "Escolas RS"})
+	if preview.Subject == "" || strings.Contains(preview.Subject, "{{") {
 		t.Fatalf("preview not rendered: %+v", preview)
 	}
 
-	detail := call[campaignDetail](t, s, "get_campaign", map[string]any{"id": c.ID})
-	if len(detail.Jobs) != 1 || detail.Email.Host != "mailpit" {
-		t.Fatalf("detail = %+v", detail)
+	// Without confirm nothing is sent.
+	dry := call[dispatchOutput](t, s, "start_campaign_dispatch", map[string]any{"campaign": "Escolas RS"})
+	if dry.Sent || !strings.Contains(dry.NextStep, "confirm=true") {
+		t.Fatalf("dispatch without confirm: %+v", dry)
 	}
 
-	list := call[listCampaignsOutput](t, s, "list_campaigns", nil)
-	if len(list.Campaigns) != 1 || list.Campaigns[0].Jobs != 1 {
-		t.Fatalf("list = %+v", list)
-	}
-
-	call[message](t, s, "remove_job_from_campaign", map[string]any{"campaign_id": c.ID, "job_id": job.ID})
-	call[message](t, s, "delete_campaign", map[string]any{"id": c.ID})
-	call[message](t, s, "delete_job", map[string]any{"id": job.ID})
+	call[message](t, s, "remove_job_from_campaign", map[string]any{"campaign": "Escolas RS", "job": "escolas"})
+	call[message](t, s, "delete_campaign", map[string]any{"campaign": "Escolas RS"})
+	call[message](t, s, "delete_job", map[string]any{"job": "escolas"})
 }

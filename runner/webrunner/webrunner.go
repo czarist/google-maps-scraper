@@ -270,6 +270,16 @@ func (w *webrunner) finishJob(ctx context.Context, job *web.Job, status string, 
 	job.Data.Run.FinishedAt = time.Now().UTC()
 	job.Data.Run.Places = w.svc.StopProgress(job.ID)
 
+	switch {
+	case runErr != nil:
+		job.Data.Run.Error = runErr.Error()
+	case status == web.StatusOK && job.Data.Run.Places == 0:
+		// Seed failures are logged by scrapemate but do not fail the run. A Google
+		// Maps search with no places at all almost always means the search failed.
+		job.Status = web.StatusFailed
+		job.Data.Run.Error = noPlacesError
+	}
+
 	// The job context may already be canceled here; the result still needs saving.
 	err := w.svc.Update(context.WithoutCancel(ctx), job)
 	if err != nil {

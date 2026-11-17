@@ -210,6 +210,8 @@ var ptBR = map[string]string{
 	"Working…":                                      "Processando…",
 	"Could not reach the server.":                   "Não foi possível acessar o servidor.",
 
+	"no places found: the search failed or was blocked (see the server log); try again, use proxies, or check the search text": "nenhum lugar encontrado: a busca falhou ou foi bloqueada (veja o log do servidor); tente de novo, use proxies ou revise o texto da busca",
+
 	// Server notices and errors shown in the campaign pages
 	"Campaign renamed":                                     "Campanha renomeada",
 	"Campaign deleted. Jobs were kept.":                    "Campanha excluída. As tarefas foram mantidas.",

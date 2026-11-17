@@ -33,6 +33,9 @@
         {{else if and (eq .Status "failed") .Data.Run.Started}}
         <p class="run-line run-muted">{{t "Stopped after %s" .Data.Run.Took}}{{if gt .Data.Run.Places 0}}, {{if eq .Data.Run.Places 1}}{{t "%d place saved" .Data.Run.Places}}{{else}}{{t "%d places saved" .Data.Run.Places}}{{end}}{{end}}</p>
         {{end}}
+        {{if and (eq .Status "failed") .Data.Run.Error}}
+        <p class="run-line run-muted">{{t .Data.Run.Error}}</p>
+        {{end}}
     </td>
     <td class="actions">
         {{ if eq .Status "ok" }}

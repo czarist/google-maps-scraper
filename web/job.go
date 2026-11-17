@@ -124,6 +124,8 @@ type JobRun struct {
 	StartedAt  time.Time `json:"started_at,omitzero"`
 	FinishedAt time.Time `json:"finished_at,omitzero"`
 	Places     int       `json:"places"`
+	// Error explains why a run failed, when it is known.
+	Error string `json:"error,omitempty"`
 }
 
 // Started reports whether the job has begun running.

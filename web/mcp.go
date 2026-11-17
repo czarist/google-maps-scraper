@@ -16,16 +16,33 @@ import (
 
 const (
 	mcpServerName      = "google-maps-scraper"
-	mcpServerVersion   = "1.0.0"
-	mcpDefaultLimit    = 50
-	mcpMaxLimit        = 1000
+	mcpServerVersion   = "1.1.0"
+	mcpDefaultLimit    = 20
+	mcpMaxLimit        = 500
 	mcpDefaultDepth    = 10
 	mcpDefaultZoom     = 15
-	mcpDefaultMaxTime  = 10 * time.Minute
-	mcpMinMaxTime      = 3 * time.Minute
+	mcpDefaultMinutes  = 10
+	mcpMinMinutes      = 3
+	mcpMaxMinutes      = 120
 	mcpDefaultRadiusKM = 50
 	metersPerKM        = 1000
+	// mcpMaxWait stays under the server's 60s write timeout.
+	mcpMaxWait     = 45 * time.Second
+	mcpWaitPoll    = 3 * time.Second
+	mcpSampleSize  = 5
+	mcpListPreview = 10
 )
+
+const mcpInstructions = `Google Maps business scraper with email campaigns.
+
+Typical workflow:
+1. create_job with a name and one or more searches like "escolas porto alegre". Optionally pass campaign (a name; it is created if missing).
+2. wait_for_job with the job name or id. Repeat while it says the job is still running.
+3. get_job_results to read the places found (only_with_email=true for places with email).
+4. To email the businesses: configure_campaign_email, then preview_campaign_email and send_test_email.
+5. start_campaign_dispatch sends real email. Call it once without confirm to see how many would be sent, ask the user, then call again with confirm=true.
+
+Jobs and campaigns can be referred to by name or by id. Every answer has a next_step hint.`
 
 // defaultResultColumns are the CSV columns returned unless all columns are asked for.
 var defaultResultColumns = []string{
@@ -54,253 +71,324 @@ func external(title string) *mcp.ToolAnnotations {
 	return &mcp.ToolAnnotations{Title: title, DestructiveHint: ptr(false), OpenWorldHint: ptr(true)}
 }
 
+func tool(name, title, description string, ann *mcp.ToolAnnotations) *mcp.Tool {
+	ann.Title = title
+
+	return &mcp.Tool{Name: name, Description: description, Annotations: ann}
+}
+
 //nolint:funlen // one registration per tool keeps the tool list readable.
 func (s *Server) newMCPServer() *mcp.Server {
-	server := mcp.NewServer(&mcp.Implementation{Name: mcpServerName, Version: mcpServerVersion}, &mcp.ServerOptions{
-		Instructions: "Scrape businesses from Google Maps, manage the proxy pool, group jobs into campaigns " +
-			"and email the businesses found. Jobs run in the background: create_job returns at once, " +
-			"then poll get_job until status is ok or failed, and read places with get_job_results.",
-	})
+	server := mcp.NewServer(&mcp.Implementation{Name: mcpServerName, Version: mcpServerVersion},
+		&mcp.ServerOptions{Instructions: mcpInstructions})
 
 	// Jobs
-	mcp.AddTool(server, &mcp.Tool{Name: "list_jobs", Description: "List scrape jobs, newest first, with status and places found.",
-		Annotations: readOnly("List jobs")}, s.mcpListJobs)
-	mcp.AddTool(server, &mcp.Tool{Name: "get_job", Description: "Get one job: settings, status, live progress and campaign.",
-		Annotations: readOnly("Get job")}, s.mcpGetJob)
-	mcp.AddTool(server, &mcp.Tool{Name: "create_job", Description: "Create a Google Maps scrape job. It is queued and runs in the background. " +
-		"Each query is one Google Maps search, such as 'escolas porto alegre'. Places farther than radius_km from the searched area are dropped. " +
-		"With no proxies given, the saved proxy pool is used unless use_saved_proxies is false.",
-		Annotations: writes("Create job", false)}, s.mcpCreateJob)
-	mcp.AddTool(server, &mcp.Tool{Name: "delete_job", Description: "Delete a job and its CSV results. This cannot be undone.",
-		Annotations: writes("Delete job", true)}, s.mcpDeleteJob)
-	mcp.AddTool(server, &mcp.Tool{Name: "get_job_results", Description: "Read the places a job found, from its CSV. Paginate with offset and limit.",
-		Annotations: readOnly("Get job results")}, s.mcpJobResults)
+	mcp.AddTool(server, tool("create_job", "Create job",
+		`Start a Google Maps search job. It runs in the background; next call wait_for_job.
+Example: {"name": "escolas poa", "searches": ["escolas porto alegre", "escolas canoas"], "campaign": "Escolas RS"}`,
+		writes("", false)), s.mcpCreateJob)
+	mcp.AddTool(server, tool("wait_for_job", "Wait for job",
+		"Wait up to 45 seconds for a job to finish, then report its status, places found and a sample. Call again if still running.",
+		readOnly("")), s.mcpWaitJob)
+	mcp.AddTool(server, tool("get_job", "Get job", "Show a job's settings, status and progress.", readOnly("")), s.mcpGetJob)
+	mcp.AddTool(server, tool("list_jobs", "List jobs", "List jobs, newest first.", readOnly("")), s.mcpListJobs)
+	mcp.AddTool(server, tool("get_job_results", "Get job results",
+		"Read the places a job found. Use only_with_email=true to get only places that have an email. Use offset to page.",
+		readOnly("")), s.mcpJobResults)
+	mcp.AddTool(server, tool("delete_job", "Delete job", "Delete a job and its results. Cannot be undone.", writes("", true)), s.mcpDeleteJob)
 
 	// Proxies
-	mcp.AddTool(server, &mcp.Tool{Name: "list_proxies", Description: "List the saved proxy pool used by new jobs.",
-		Annotations: readOnly("List proxies")}, s.mcpListProxies)
-	mcp.AddTool(server, &mcp.Tool{Name: "add_proxies", Description: "Add proxies to the saved pool. Supports http, https and socks5, e.g. http://user:pass@host:port.",
-		Annotations: writes("Add proxies", false)}, s.mcpAddProxies)
-	mcp.AddTool(server, &mcp.Tool{Name: "remove_proxies", Description: "Remove proxies from the saved pool.",
-		Annotations: writes("Remove proxies", true)}, s.mcpRemoveProxies)
-	mcp.AddTool(server, &mcp.Tool{Name: "set_proxies", Description: "Replace the whole saved proxy pool. An empty list clears it.",
-		Annotations: writes("Replace proxies", true)}, s.mcpSetProxies)
-	mcp.AddTool(server, &mcp.Tool{Name: "test_proxies", Description: "Request Google Maps through each proxy and report status and latency. " +
-		"Tests the saved pool when no proxies are given. remove_failed drops failing ones from the pool.",
-		Annotations: external("Test proxies")}, s.mcpTestProxies)
+	mcp.AddTool(server, tool("list_proxies", "List proxies", "Show the saved proxies. New jobs use them automatically.", readOnly("")), s.mcpListProxies)
+	mcp.AddTool(server, tool("add_proxies", "Add proxies",
+		`Save proxies for new jobs. Format: http://user:pass@host:port, https://host:port or socks5://host:port.`,
+		writes("", false)), s.mcpAddProxies)
+	mcp.AddTool(server, tool("remove_proxies", "Remove proxies", "Remove saved proxies. Pass all=true to remove every proxy.", writes("", true)), s.mcpRemoveProxies)
+	mcp.AddTool(server, tool("test_proxies", "Test proxies",
+		"Check that each saved proxy can reach Google Maps. remove_failed=true deletes the ones that fail.",
+		external("")), s.mcpTestProxies)
 
 	// Campaigns
-	mcp.AddTool(server, &mcp.Tool{Name: "list_campaigns", Description: "List campaigns with job count, email readiness and last dispatch status.",
-		Annotations: readOnly("List campaigns")}, s.mcpListCampaigns)
-	mcp.AddTool(server, &mcp.Tool{Name: "get_campaign", Description: "Get a campaign: jobs, email settings (password hidden), recipients ready and dispatch history.",
-		Annotations: readOnly("Get campaign")}, s.mcpGetCampaign)
-	mcp.AddTool(server, &mcp.Tool{Name: "create_campaign", Description: "Create a campaign. Campaigns group jobs and hold their own email settings.",
-		Annotations: writes("Create campaign", false)}, s.mcpCreateCampaign)
-	mcp.AddTool(server, &mcp.Tool{Name: "rename_campaign", Description: "Rename a campaign.",
-		Annotations: writes("Rename campaign", false)}, s.mcpRenameCampaign)
-	mcp.AddTool(server, &mcp.Tool{Name: "delete_campaign", Description: "Delete a campaign, its email settings and send history. Jobs and CSVs are kept.",
-		Annotations: writes("Delete campaign", true)}, s.mcpDeleteCampaign)
-	mcp.AddTool(server, &mcp.Tool{Name: "add_job_to_campaign", Description: "Put a job in a campaign. A job belongs to one campaign, so it leaves its previous one.",
-		Annotations: writes("Add job to campaign", false)}, s.mcpAssignJob)
-	mcp.AddTool(server, &mcp.Tool{Name: "remove_job_from_campaign", Description: "Take a job out of a campaign. The job is kept.",
-		Annotations: writes("Remove job from campaign", false)}, s.mcpUnassignJob)
+	mcp.AddTool(server, tool("list_campaigns", "List campaigns", "List campaigns with their job count and email status.", readOnly("")), s.mcpListCampaigns)
+	mcp.AddTool(server, tool("get_campaign", "Get campaign",
+		"Show a campaign: its jobs, email settings, how many addresses are ready to receive email, and send history.",
+		readOnly("")), s.mcpGetCampaign)
+	mcp.AddTool(server, tool("create_campaign", "Create campaign", "Create a campaign. A campaign groups jobs and has its own email settings.", writes("", false)), s.mcpCreateCampaign)
+	mcp.AddTool(server, tool("rename_campaign", "Rename campaign", "Rename a campaign.", writes("", false)), s.mcpRenameCampaign)
+	mcp.AddTool(server, tool("delete_campaign", "Delete campaign", "Delete a campaign with its email settings and history. Jobs are kept.", writes("", true)), s.mcpDeleteCampaign)
+	mcp.AddTool(server, tool("add_job_to_campaign", "Add job to campaign", "Put a job in a campaign. The campaign is created if it does not exist.", writes("", false)), s.mcpAssignJob)
+	mcp.AddTool(server, tool("remove_job_from_campaign", "Remove job from campaign", "Take a job out of its campaign. The job is kept.", writes("", false)), s.mcpUnassignJob)
 
 	// Campaign email
-	mcp.AddTool(server, &mcp.Tool{Name: "configure_campaign_email", Description: "Save SMTP and message settings for a campaign. " +
-		"Only the fields given change. Subject and body are Go templates with {{.Title}} {{.Email}} {{.Phone}} {{.Website}} {{.Address}} {{.Category}}.",
-		Annotations: writes("Configure campaign email", false)}, s.mcpConfigureMail)
-	mcp.AddTool(server, &mcp.Tool{Name: "test_campaign_smtp", Description: "Connect and log in to the campaign's SMTP server without sending anything.",
-		Annotations: external("Test SMTP connection")}, s.mcpCheckMail)
-	mcp.AddTool(server, &mcp.Tool{Name: "preview_campaign_email", Description: "Render the campaign's subject and body with sample business data.",
-		Annotations: readOnly("Preview campaign email")}, s.mcpPreviewMail)
-	mcp.AddTool(server, &mcp.Tool{Name: "send_test_email", Description: "Send one test message with the campaign's settings to the given address.",
-		Annotations: external("Send test email")}, s.mcpSendTestMail)
-	mcp.AddTool(server, &mcp.Tool{Name: "start_campaign_dispatch", Description: "Email every business address collected by the campaign's jobs. " +
-		"This sends real email to real businesses unless the SMTP server is a test inbox. Confirm with the user first. " +
-		"Addresses already sent are skipped unless resend is true. Runs in the background; follow it with get_campaign.",
-		Annotations: &mcp.ToolAnnotations{Title: "Start campaign dispatch", DestructiveHint: ptr(true), OpenWorldHint: ptr(true)}}, s.mcpStartDispatch)
+	mcp.AddTool(server, tool("configure_campaign_email", "Configure campaign email",
+		`Save the campaign's SMTP server and message. Only the fields you pass change.
+In subject and body you can use {{.Title}} {{.Email}} {{.Phone}} {{.Website}} {{.Address}} {{.Category}}.
+Example: {"campaign": "Escolas RS", "smtp_host": "smtp.gmail.com", "smtp_port": 587, "encryption": "starttls", "smtp_username": "me@gmail.com", "smtp_password": "app-password", "from_email": "me@gmail.com", "subject": "Olá {{.Title}}", "body": "..."}`,
+		writes("", false)), s.mcpConfigureMail)
+	mcp.AddTool(server, tool("test_campaign_smtp", "Test SMTP", "Check that the campaign's SMTP server accepts the login. Sends nothing.", external("")), s.mcpCheckMail)
+	mcp.AddTool(server, tool("preview_campaign_email", "Preview email", "Show the campaign's email filled with sample business data. Sends nothing.", readOnly("")), s.mcpPreviewMail)
+	mcp.AddTool(server, tool("send_test_email", "Send test email", "Send one test email to the address in to.", external("")), s.mcpSendTestMail)
+	mcp.AddTool(server, tool("start_campaign_dispatch", "Send campaign emails",
+		"Email every business the campaign's jobs found. Without confirm=true it only reports how many would be sent. "+
+			"Always ask the user before calling with confirm=true. Addresses that already got this campaign are skipped.",
+		&mcp.ToolAnnotations{DestructiveHint: ptr(true), OpenWorldHint: ptr(true)}), s.mcpStartDispatch)
 
 	return server
 }
 
-// ---------- shared types
+// ---------- lookups by name or id
 
-type idInput struct {
-	ID string `json:"id" jsonschema:"the job or campaign ID"`
+func (s *Server) findJob(ctx context.Context, ref string) (Job, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return Job{}, errors.New("job is required: pass the job name or id (see list_jobs)")
+	}
+
+	jobs, err := s.svc.All(ctx)
+	if err != nil {
+		return Job{}, err
+	}
+
+	var byName []Job
+
+	for i := range jobs {
+		if jobs[i].ID == ref {
+			return jobs[i], nil
+		}
+
+		if strings.EqualFold(jobs[i].Name, ref) {
+			byName = append(byName, jobs[i])
+		}
+	}
+
+	switch len(byName) {
+	case 1:
+		return byName[0], nil
+	case 0:
+		names := make([]string, 0, mcpListPreview)
+		for i := 0; i < len(jobs) && i < mcpListPreview; i++ {
+			names = append(names, fmt.Sprintf("%q", jobs[i].Name))
+		}
+
+		return Job{}, fmt.Errorf("no job named %q. Recent jobs: %s. Call list_jobs to see all", ref, strings.Join(names, ", "))
+	default:
+		ids := make([]string, 0, len(byName))
+		for i := range byName {
+			ids = append(ids, byName[i].ID)
+		}
+
+		return Job{}, fmt.Errorf("%d jobs are named %q; pass one of these ids instead: %s", len(byName), ref, strings.Join(ids, ", "))
+	}
 }
 
-type message struct {
-	Message string `json:"message"`
+func (s *Server) findCampaign(ctx context.Context, ref string) (CampaignSummary, error) {
+	ref = strings.TrimSpace(ref)
+	if ref == "" {
+		return CampaignSummary{}, errors.New("campaign is required: pass the campaign name or id (see list_campaigns)")
+	}
+
+	items, err := s.svc.ListCampaigns(ctx)
+	if err != nil {
+		return CampaignSummary{}, errors.New(publicErr(err))
+	}
+
+	for _, c := range items {
+		if c.ID == ref || strings.EqualFold(c.Name, ref) {
+			return c, nil
+		}
+	}
+
+	names := make([]string, 0, len(items))
+	for _, c := range items {
+		names = append(names, fmt.Sprintf("%q", c.Name))
+	}
+
+	if len(names) == 0 {
+		return CampaignSummary{}, fmt.Errorf("no campaign named %q and there are no campaigns yet. Call create_campaign first", ref)
+	}
+
+	return CampaignSummary{}, fmt.Errorf("no campaign named %q. Existing campaigns: %s", ref, strings.Join(names, ", "))
 }
 
-type jobSummary struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	CreatedAt    string `json:"created_at"`
-	Places       int    `json:"places"`
-	Queries      int    `json:"queries"`
-	CampaignID   string `json:"campaign_id,omitempty"`
-	CampaignName string `json:"campaign_name,omitempty"`
+// findOrCreateCampaign returns the campaign, creating it when no campaign has that name.
+func (s *Server) findOrCreateCampaign(ctx context.Context, ref string) (Campaign, bool, error) {
+	if c, err := s.findCampaign(ctx, ref); err == nil {
+		return c.Campaign, false, nil
+	}
+
+	if _, err := uuid.Parse(strings.TrimSpace(ref)); err == nil {
+		return Campaign{}, false, fmt.Errorf("no campaign has id %s. Call list_campaigns", ref)
+	}
+
+	c := Campaign{ID: uuid.NewV4().String(), Name: strings.TrimSpace(ref)}
+	if err := s.svc.CreateCampaign(ctx, &c); err != nil {
+		return Campaign{}, false, errors.New(publicErr(err))
+	}
+
+	return c, true, nil
 }
 
-func (s *Server) summarize(j *Job) jobSummary {
+// ---------- jobs
+
+type jobRef struct {
+	Job string `json:"job" jsonschema:"job name or id"`
+}
+
+type jobView struct {
+	ID           string   `json:"id"`
+	Name         string   `json:"name"`
+	Status       string   `json:"status" jsonschema:"pending (queued), working (running), ok (finished) or failed"`
+	Places       int      `json:"places_found"`
+	Searches     []string `json:"searches,omitempty"`
+	Campaign     string   `json:"campaign,omitempty"`
+	CreatedAt    string   `json:"created_at"`
+	Elapsed      string   `json:"elapsed,omitempty"`
+	MaxMinutes   int      `json:"max_minutes,omitempty"`
+	RadiusKM     float64  `json:"radius_km,omitempty"`
+	Lang         string   `json:"lang,omitempty"`
+	CollectEmail bool     `json:"collect_emails"`
+	Proxies      int      `json:"proxies_used"`
+	Error        string   `json:"error,omitempty"`
+}
+
+func (s *Server) view(j *Job, full bool) jobView {
 	places := j.Data.Run.Places
 	if live, ok := s.svc.Progress(j.ID); ok {
 		places = live
 	}
 
-	return jobSummary{
-		ID:           j.ID,
-		Name:         j.Name,
-		Status:       j.Status,
-		CreatedAt:    j.Date.UTC().Format(time.RFC3339),
-		Places:       places,
-		Queries:      len(j.Data.Keywords),
-		CampaignID:   j.CampaignID,
-		CampaignName: j.CampaignName,
+	v := jobView{
+		ID: j.ID, Name: j.Name, Status: j.Status, Places: places, Campaign: j.CampaignName,
+		CreatedAt: j.Date.UTC().Format(time.RFC3339), CollectEmail: j.Data.Email, Proxies: len(j.Data.Proxies),
+		Error: j.Data.Run.Error,
+	}
+
+	if j.Data.Run.Started() {
+		v.Elapsed = j.ElapsedLabel()
+	}
+
+	if full {
+		v.Searches = j.Data.Keywords
+		v.MaxMinutes = int(j.Data.MaxTime.Minutes())
+		v.RadiusKM = float64(j.Data.Radius) / metersPerKM
+		v.Lang = j.Data.Lang
+	}
+
+	return v
+}
+
+func jobNextStep(j *jobView) string {
+	switch j.Status {
+	case StatusOK:
+		return fmt.Sprintf("Job finished. Call get_job_results with job=%q to read the places.", j.Name)
+	case StatusFailed:
+		if j.Error != "" {
+			return "Job failed: " + j.Error + ". Tell the user; do not retry more than once."
+		}
+
+		return "Job failed. Tell the user; do not retry more than once."
+	default:
+		return fmt.Sprintf("Job is %s. Call wait_for_job with job=%q.", j.Status, j.Name)
 	}
 }
 
-// ---------- jobs
+type jobOutput struct {
+	Job      jobView `json:"job"`
+	NextStep string  `json:"next_step"`
+}
+
+func (s *Server) mcpGetJob(ctx context.Context, _ *mcp.CallToolRequest, in jobRef) (*mcp.CallToolResult, jobOutput, error) {
+	j, err := s.findJob(ctx, in.Job)
+	if err != nil {
+		return nil, jobOutput{}, err
+	}
+
+	v := s.view(&j, true)
+
+	return nil, jobOutput{Job: v, NextStep: jobNextStep(&v)}, nil
+}
 
 type listJobsInput struct {
 	Page int `json:"page,omitempty" jsonschema:"page number, starting at 1"`
 }
 
 type listJobsOutput struct {
-	Jobs       []jobSummary `json:"jobs"`
-	Page       int          `json:"page"`
-	TotalPages int          `json:"total_pages"`
-	Running    int          `json:"running"`
-	Queued     int          `json:"queued"`
+	Jobs       []jobView `json:"jobs"`
+	Page       int       `json:"page"`
+	TotalPages int       `json:"total_pages"`
+	Running    int       `json:"running"`
+	Queued     int       `json:"queued"`
 }
 
 func (s *Server) mcpListJobs(ctx context.Context, _ *mcp.CallToolRequest, in listJobsInput) (*mcp.CallToolResult, listJobsOutput, error) {
-	page := max(in.Page, 1)
-
-	jp, err := s.svc.ListJobs(ctx, page, jobsPageLimit)
+	jp, err := s.svc.ListJobs(ctx, max(in.Page, 1), jobsPageLimit)
 	if err != nil {
 		return nil, listJobsOutput{}, err
 	}
 
-	out := listJobsOutput{Jobs: make([]jobSummary, 0, len(jp.Jobs)), Page: jp.CurrentPage, TotalPages: jp.TotalPages, Running: jp.Running, Queued: jp.Queued}
+	out := listJobsOutput{Jobs: make([]jobView, 0, len(jp.Jobs)), Page: jp.CurrentPage, TotalPages: jp.TotalPages, Running: jp.Running, Queued: jp.Queued}
 	for i := range jp.Jobs {
-		out.Jobs = append(out.Jobs, s.summarize(&jp.Jobs[i]))
+		out.Jobs = append(out.Jobs, s.view(&jp.Jobs[i], false))
 	}
 
 	return nil, out, nil
 }
 
-type jobDetail struct {
-	jobSummary
-	Queries      []string `json:"queries"`
-	Lang         string   `json:"lang"`
-	Depth        int      `json:"depth"`
-	MaxTime      string   `json:"max_time"`
-	RadiusKM     float64  `json:"radius_km"`
-	Lat          string   `json:"lat,omitempty"`
-	Lon          string   `json:"lon,omitempty"`
-	Zoom         int      `json:"zoom"`
-	FastMode     bool     `json:"fast_mode"`
-	Emails       bool     `json:"collect_emails"`
-	ProxyCount   int      `json:"proxy_count"`
-	StartedAt    string   `json:"started_at,omitempty"`
-	FinishedAt   string   `json:"finished_at,omitempty"`
-	ElapsedLabel string   `json:"elapsed,omitempty"`
-}
-
-func (s *Server) jobDetail(ctx context.Context, id string) (jobDetail, error) {
-	job, err := s.svc.Get(ctx, id)
-	if err != nil {
-		return jobDetail{}, err
-	}
-
-	withCampaign := []Job{job}
-	if err := s.svc.attachCampaigns(ctx, withCampaign); err == nil {
-		job = withCampaign[0]
-	}
-
-	d := jobDetail{
-		jobSummary: s.summarize(&job),
-		Queries:    job.Data.Keywords,
-		Lang:       job.Data.Lang,
-		Depth:      job.Data.Depth,
-		MaxTime:    job.Data.MaxTime.String(),
-		RadiusKM:   float64(job.Data.Radius) / metersPerKM,
-		Lat:        job.Data.Lat,
-		Lon:        job.Data.Lon,
-		Zoom:       job.Data.Zoom,
-		FastMode:   job.Data.FastMode,
-		Emails:     job.Data.Email,
-		ProxyCount: len(job.Data.Proxies),
-	}
-
-	if job.Data.Run.Started() {
-		d.StartedAt = job.Data.Run.StartedAt.UTC().Format(time.RFC3339)
-		d.ElapsedLabel = job.ElapsedLabel()
-	}
-
-	if !job.Data.Run.FinishedAt.IsZero() {
-		d.FinishedAt = job.Data.Run.FinishedAt.UTC().Format(time.RFC3339)
-	}
-
-	return d, nil
-}
-
-func (s *Server) mcpGetJob(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, jobDetail, error) {
-	d, err := s.jobDetail(ctx, in.ID)
-
-	return nil, d, err
-}
-
 type createJobInput struct {
-	Name            string   `json:"name" jsonschema:"job name"`
-	Queries         []string `json:"queries" jsonschema:"Google Maps searches, one per item, e.g. 'escolas porto alegre'"`
-	Lang            string   `json:"lang,omitempty" jsonschema:"two-letter results language, default pt"`
-	Depth           int      `json:"depth,omitempty" jsonschema:"how many times the results list is scrolled, default 10"`
-	MaxTime         string   `json:"max_time,omitempty" jsonschema:"job time limit like 10m or 1h, minimum 3m, default 10m"`
-	RadiusKM        float64  `json:"radius_km,omitempty" jsonschema:"drop places farther than this from the searched area, default 50"`
-	Lat             *float64 `json:"lat,omitempty" jsonschema:"search center latitude, optional (required in fast mode)"`
-	Lon             *float64 `json:"lon,omitempty" jsonschema:"search center longitude, optional (required in fast mode)"`
-	Zoom            int      `json:"zoom,omitempty" jsonschema:"map zoom 1-21, default 15"`
-	FastMode        bool     `json:"fast_mode,omitempty" jsonschema:"beta: search only around lat/lon with fewer details"`
-	CollectEmails   *bool    `json:"collect_emails,omitempty" jsonschema:"visit each business website to find emails, default true"`
-	Proxies         []string `json:"proxies,omitempty" jsonschema:"proxies for this job only"`
-	UseSavedProxies *bool    `json:"use_saved_proxies,omitempty" jsonschema:"use the saved pool when proxies is empty, default true"`
-	CampaignID      string   `json:"campaign_id,omitempty" jsonschema:"put the job in this campaign"`
+	Name          string   `json:"name" jsonschema:"a short name for the job"`
+	Searches      []string `json:"searches" jsonschema:"Google Maps searches, each with what and where, e.g. [\"escolas porto alegre\"]"`
+	Campaign      string   `json:"campaign,omitempty" jsonschema:"campaign name or id to put the job in; created if it does not exist"`
+	MaxMinutes    int      `json:"max_minutes,omitempty" jsonschema:"time limit in minutes, 3 to 120, default 10"`
+	RadiusKM      float64  `json:"radius_km,omitempty" jsonschema:"drop places farther than this many km from the searched area, default 50"`
+	CollectEmails *bool    `json:"collect_emails,omitempty" jsonschema:"visit each business website to find emails, default true"`
+	Lang          string   `json:"lang,omitempty" jsonschema:"two-letter results language, default pt"`
+	Depth         int      `json:"depth,omitempty" jsonschema:"how far to scroll the results list; more finds more places, default 10"`
+	Lat           *float64 `json:"lat,omitempty" jsonschema:"optional search center latitude"`
+	Lon           *float64 `json:"lon,omitempty" jsonschema:"optional search center longitude"`
+	UseProxies    *bool    `json:"use_proxies,omitempty" jsonschema:"use the saved proxies, default true"`
 }
 
-func (s *Server) mcpCreateJob(ctx context.Context, _ *mcp.CallToolRequest, in createJobInput) (*mcp.CallToolResult, jobDetail, error) {
+type createJobOutput struct {
+	Job             jobView `json:"job"`
+	CampaignCreated bool    `json:"campaign_created,omitempty"`
+	NextStep        string  `json:"next_step"`
+}
+
+func (s *Server) mcpCreateJob(ctx context.Context, _ *mcp.CallToolRequest, in createJobInput) (*mcp.CallToolResult, createJobOutput, error) {
 	job, err := s.buildJob(&in)
 	if err != nil {
-		return nil, jobDetail{}, err
+		return nil, createJobOutput{}, err
 	}
 
-	campaignID, err := optionalCampaignID(in.CampaignID)
-	if err != nil {
-		return nil, jobDetail{}, err
-	}
+	var (
+		campaign Campaign
+		created  bool
+	)
 
-	if campaignID != "" {
-		if _, err := s.svc.GetCampaign(ctx, campaignID); err != nil {
-			return nil, jobDetail{}, errors.New(publicErr(err))
+	if strings.TrimSpace(in.Campaign) != "" {
+		campaign, created, err = s.findOrCreateCampaign(ctx, in.Campaign)
+		if err != nil {
+			return nil, createJobOutput{}, err
 		}
 	}
 
 	if err := s.svc.Create(ctx, &job); err != nil {
-		return nil, jobDetail{}, err
+		return nil, createJobOutput{}, err
 	}
 
-	if campaignID != "" {
-		if err := s.svc.AssignJob(ctx, campaignID, job.ID); err != nil {
-			return nil, jobDetail{}, errors.New(publicErr(err))
+	if campaign.ID != "" {
+		if err := s.svc.AssignJob(ctx, campaign.ID, job.ID); err != nil {
+			return nil, createJobOutput{}, errors.New(publicErr(err))
 		}
+
+		job.CampaignID, job.CampaignName = campaign.ID, campaign.Name
 	}
 
-	d, err := s.jobDetail(ctx, job.ID)
+	v := s.view(&job, true)
 
-	return nil, d, err
+	return nil, createJobOutput{
+		Job: v, CampaignCreated: created,
+		NextStep: fmt.Sprintf("Job queued. Call wait_for_job with job=%q until it finishes (about %d minutes at most).", job.Name, v.MaxMinutes),
+	}, nil
 }
 
 func (s *Server) buildJob(in *createJobInput) (Job, error) {
@@ -311,33 +399,34 @@ func (s *Server) buildJob(in *createJobInput) (Job, error) {
 		Status: StatusPending,
 	}
 
-	for _, q := range in.Queries {
-		if q = strings.TrimSpace(q); q != "" {
-			job.Data.Keywords = append(job.Data.Keywords, q)
+	if job.Name == "" {
+		return Job{}, errors.New(`name is required, e.g. "escolas poa"`)
+	}
+
+	for _, q := range in.Searches {
+		// Accept several searches in one string, one per line.
+		for _, line := range strings.Split(q, "\n") {
+			if line = strings.TrimSpace(line); line != "" {
+				job.Data.Keywords = append(job.Data.Keywords, line)
+			}
 		}
 	}
 
-	job.Data.Lang = orDefault(strings.TrimSpace(in.Lang), "pt")
+	if len(job.Data.Keywords) == 0 {
+		return Job{}, errors.New(`searches is required, e.g. ["escolas porto alegre"]`)
+	}
+
+	minutes := orDefault(in.MaxMinutes, mcpDefaultMinutes)
+	if minutes < mcpMinMinutes || minutes > mcpMaxMinutes {
+		return Job{}, fmt.Errorf("max_minutes must be between %d and %d", mcpMinMinutes, mcpMaxMinutes)
+	}
+
+	job.Data.MaxTime = time.Duration(minutes) * time.Minute
+	job.Data.Lang = strings.ToLower(orDefault(strings.TrimSpace(in.Lang), "pt"))
 	job.Data.Depth = orDefault(in.Depth, mcpDefaultDepth)
-	job.Data.Zoom = orDefault(in.Zoom, mcpDefaultZoom)
+	job.Data.Zoom = mcpDefaultZoom
 	job.Data.Radius = int(orDefault(in.RadiusKM, mcpDefaultRadiusKM) * metersPerKM)
-	job.Data.FastMode = in.FastMode
 	job.Data.Email = in.CollectEmails == nil || *in.CollectEmails
-
-	job.Data.MaxTime = mcpDefaultMaxTime
-
-	if in.MaxTime != "" {
-		d, err := time.ParseDuration(in.MaxTime)
-		if err != nil {
-			return Job{}, fmt.Errorf("invalid max_time %q: use values like 10m or 1h", in.MaxTime)
-		}
-
-		if d < mcpMinMaxTime {
-			return Job{}, errors.New("max_time must be at least 3m")
-		}
-
-		job.Data.MaxTime = d
-	}
 
 	if (in.Lat == nil) != (in.Lon == nil) {
 		return Job{}, errors.New("give both lat and lon, or neither")
@@ -348,22 +437,14 @@ func (s *Server) buildJob(in *createJobInput) (Job, error) {
 		job.Data.Lon = fmt.Sprint(*in.Lon)
 	}
 
-	proxies := in.Proxies
-	if len(proxies) == 0 && (in.UseSavedProxies == nil || *in.UseSavedProxies) {
+	if in.UseProxies == nil || *in.UseProxies {
 		saved, err := s.svc.SavedProxies()
 		if err != nil {
 			return Job{}, err
 		}
 
-		proxies = saved
+		job.Data.Proxies = saved
 	}
-
-	clean, err := normalizeProxies(proxies)
-	if err != nil {
-		return Job{}, err
-	}
-
-	job.Data.Proxies = clean
 
 	return job, job.Validate()
 }
@@ -377,46 +458,98 @@ func orDefault[T comparable](v, def T) T {
 	return v
 }
 
-func (s *Server) mcpDeleteJob(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, message, error) {
-	job, err := s.svc.Get(ctx, in.ID)
+type waitOutput struct {
+	Job        jobView             `json:"job"`
+	Finished   bool                `json:"finished"`
+	WithEmail  int                 `json:"places_with_email,omitempty"`
+	SamplePlcs []map[string]string `json:"sample_places,omitempty"`
+	NextStep   string              `json:"next_step"`
+}
+
+func (s *Server) mcpWaitJob(ctx context.Context, _ *mcp.CallToolRequest, in jobRef) (*mcp.CallToolResult, waitOutput, error) {
+	j, err := s.findJob(ctx, in.Job)
+	if err != nil {
+		return nil, waitOutput{}, err
+	}
+
+	deadline := time.Now().Add(mcpMaxWait)
+
+	for (j.Status == StatusPending || j.Status == StatusWorking) && time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, waitOutput{}, ctx.Err()
+		case <-time.After(mcpWaitPoll):
+		}
+
+		if j, err = s.svc.Get(ctx, j.ID); err != nil {
+			return nil, waitOutput{}, err
+		}
+	}
+
+	_ = s.svc.attachCampaigns(ctx, []Job{j})
+
+	v := s.view(&j, false)
+	out := waitOutput{Job: v, Finished: j.Status == StatusOK || j.Status == StatusFailed}
+
+	if j.Status != StatusOK {
+		out.NextStep = jobNextStep(&v)
+		if !out.Finished {
+			out.NextStep = fmt.Sprintf("Still %s with %d places so far. Call wait_for_job again with job=%q.", j.Status, v.Places, j.Name)
+		}
+
+		return nil, out, nil
+	}
+
+	if res, err := s.readResults(j.ID); err == nil {
+		out.Job.Places = res.Total
+		out.WithEmail = res.WithEmail
+
+		for i := 0; i < len(res.rows) && i < mcpSampleSize; i++ {
+			out.SamplePlcs = append(out.SamplePlcs, pick(res.header, res.rows[i], []string{"title", "address", "phone", "emails"}))
+		}
+	}
+
+	out.NextStep = fmt.Sprintf("Finished: %d places, %d with email. Call get_job_results with job=%q for the full list.", out.Job.Places, out.WithEmail, j.Name)
+
+	return nil, out, nil
+}
+
+func (s *Server) mcpDeleteJob(ctx context.Context, _ *mcp.CallToolRequest, in jobRef) (*mcp.CallToolResult, message, error) {
+	j, err := s.findJob(ctx, in.Job)
 	if err != nil {
 		return nil, message{}, err
 	}
 
-	if err := s.svc.Delete(ctx, job.ID); err != nil {
+	if err := s.svc.Delete(ctx, j.ID); err != nil {
 		return nil, message{}, err
 	}
 
-	return nil, message{Message: fmt.Sprintf("job %q deleted", job.Name)}, nil
+	return nil, message{Message: fmt.Sprintf("Job %q and its results were deleted.", j.Name)}, nil
 }
 
-type resultsInput struct {
-	ID         string `json:"id" jsonschema:"the job ID"`
-	Offset     int    `json:"offset,omitempty" jsonschema:"rows to skip"`
-	Limit      int    `json:"limit,omitempty" jsonschema:"rows to return, default 50, max 1000"`
-	AllColumns bool   `json:"all_columns,omitempty" jsonschema:"return every CSV column instead of the main ones"`
+// ---------- results
+
+type csvResults struct {
+	header    []string
+	rows      [][]string
+	Total     int
+	WithEmail int
+	Path      string
 }
 
-type resultsOutput struct {
-	Total   int                 `json:"total"`
-	Offset  int                 `json:"offset"`
-	Places  []map[string]string `json:"places"`
-	CSVPath string              `json:"csv_path"`
-}
-
-func (s *Server) mcpJobResults(_ context.Context, _ *mcp.CallToolRequest, in resultsInput) (*mcp.CallToolResult, resultsOutput, error) {
-	path, err := s.svc.csvPath(in.ID)
+func (s *Server) readResults(id string) (csvResults, error) {
+	path, err := s.svc.csvPath(id)
 	if err != nil {
-		return nil, resultsOutput{}, err
+		return csvResults{}, err
 	}
 
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return nil, resultsOutput{}, errors.New("no results yet: the job has not written its CSV")
+		return csvResults{}, errors.New("this job has no results yet. Call wait_for_job first")
 	}
 
 	if err != nil {
-		return nil, resultsOutput{}, err
+		return csvResults{}, err
 	}
 	defer f.Close()
 
@@ -425,34 +558,108 @@ func (s *Server) mcpJobResults(_ context.Context, _ *mcp.CallToolRequest, in res
 
 	rows, err := r.ReadAll()
 	if err != nil {
-		return nil, resultsOutput{}, fmt.Errorf("read results: %w", err)
+		return csvResults{}, fmt.Errorf("read results: %w", err)
 	}
 
-	out := resultsOutput{Places: []map[string]string{}, CSVPath: path, Offset: max(in.Offset, 0)}
+	res := csvResults{Path: path}
 	if len(rows) == 0 {
-		return nil, out, nil
+		return res, nil
 	}
 
-	header, data := rows[0], rows[1:]
-	out.Total = len(data)
+	res.header, res.rows = rows[0], rows[1:]
+	res.Total = len(res.rows)
 
-	want := map[string]bool{}
-	for _, c := range defaultResultColumns {
-		want[c] = true
+	emailCol := index(res.header, "emails")
+	for _, row := range res.rows {
+		if emailCol >= 0 && emailCol < len(row) && strings.TrimSpace(row[emailCol]) != "" {
+			res.WithEmail++
+		}
+	}
+
+	return res, nil
+}
+
+func index(header []string, name string) int {
+	for i, h := range header {
+		if h == name {
+			return i
+		}
+	}
+
+	return -1
+}
+
+func pick(header, row, cols []string) map[string]string {
+	out := make(map[string]string, len(cols))
+
+	for _, c := range cols {
+		if i := index(header, c); i >= 0 && i < len(row) && row[i] != "" {
+			out[c] = row[i]
+		}
+	}
+
+	return out
+}
+
+type resultsInput struct {
+	Job           string `json:"job" jsonschema:"job name or id"`
+	OnlyWithEmail bool   `json:"only_with_email,omitempty" jsonschema:"return only places that have an email"`
+	Offset        int    `json:"offset,omitempty" jsonschema:"places to skip, for paging"`
+	Limit         int    `json:"limit,omitempty" jsonschema:"places to return, default 20, max 500"`
+	AllColumns    bool   `json:"all_columns,omitempty" jsonschema:"return every column (reviews, hours, etc.) instead of the main ones"`
+}
+
+type resultsOutput struct {
+	Total     int                 `json:"total_places"`
+	WithEmail int                 `json:"places_with_email"`
+	Matching  int                 `json:"matching"`
+	Offset    int                 `json:"offset"`
+	Places    []map[string]string `json:"places"`
+	CSVPath   string              `json:"csv_path"`
+	NextStep  string              `json:"next_step"`
+}
+
+func (s *Server) mcpJobResults(ctx context.Context, _ *mcp.CallToolRequest, in resultsInput) (*mcp.CallToolResult, resultsOutput, error) {
+	j, err := s.findJob(ctx, in.Job)
+	if err != nil {
+		return nil, resultsOutput{}, err
+	}
+
+	res, err := s.readResults(j.ID)
+	if err != nil {
+		return nil, resultsOutput{}, err
+	}
+
+	cols := defaultResultColumns
+	if in.AllColumns {
+		cols = res.header
+	}
+
+	emailCol := index(res.header, "emails")
+	matching := make([][]string, 0, len(res.rows))
+
+	for _, row := range res.rows {
+		if in.OnlyWithEmail && (emailCol < 0 || emailCol >= len(row) || strings.TrimSpace(row[emailCol]) == "") {
+			continue
+		}
+
+		matching = append(matching, row)
+	}
+
+	out := resultsOutput{
+		Total: res.Total, WithEmail: res.WithEmail, Matching: len(matching),
+		Offset: max(in.Offset, 0), Places: []map[string]string{}, CSVPath: res.Path,
 	}
 
 	limit := min(orDefault(in.Limit, mcpDefaultLimit), mcpMaxLimit)
+	for i := out.Offset; i < len(matching) && len(out.Places) < limit; i++ {
+		out.Places = append(out.Places, pick(res.header, matching[i], cols))
+	}
 
-	for i := out.Offset; i < len(data) && len(out.Places) < limit; i++ {
-		place := make(map[string]string)
-
-		for c, name := range header {
-			if c < len(data[i]) && (in.AllColumns || want[name]) && data[i][c] != "" {
-				place[name] = data[i][c]
-			}
-		}
-
-		out.Places = append(out.Places, place)
+	if end := out.Offset + len(out.Places); end < len(matching) {
+		out.NextStep = fmt.Sprintf("Showing %d-%d of %d. Call again with offset=%d for more.", out.Offset+1, end, len(matching), end)
+	} else {
+		out.NextStep = "That is all of them. To email these businesses, put the job in a campaign and use configure_campaign_email."
 	}
 
 	return nil, out, nil
@@ -460,8 +667,17 @@ func (s *Server) mcpJobResults(_ context.Context, _ *mcp.CallToolRequest, in res
 
 // ---------- proxies
 
+type message struct {
+	Message string `json:"message"`
+}
+
 type proxiesInput struct {
 	Proxies []string `json:"proxies" jsonschema:"proxy URLs like http://user:pass@host:port or socks5://host:port"`
+}
+
+type removeProxiesInput struct {
+	Proxies []string `json:"proxies,omitempty" jsonschema:"proxies to remove"`
+	All     bool     `json:"all,omitempty" jsonschema:"remove every saved proxy"`
 }
 
 type proxiesOutput struct {
@@ -485,17 +701,21 @@ func (s *Server) mcpAddProxies(_ context.Context, _ *mcp.CallToolRequest, in pro
 	return pool(s.svc.AddSavedProxies(in.Proxies))
 }
 
-func (s *Server) mcpRemoveProxies(_ context.Context, _ *mcp.CallToolRequest, in proxiesInput) (*mcp.CallToolResult, proxiesOutput, error) {
+func (s *Server) mcpRemoveProxies(_ context.Context, _ *mcp.CallToolRequest, in removeProxiesInput) (*mcp.CallToolResult, proxiesOutput, error) {
+	if in.All {
+		return pool(s.svc.SetSavedProxies(nil))
+	}
+
+	if len(in.Proxies) == 0 {
+		return nil, proxiesOutput{}, errors.New("pass proxies to remove, or all=true to remove every proxy")
+	}
+
 	return pool(s.svc.RemoveSavedProxies(in.Proxies))
 }
 
-func (s *Server) mcpSetProxies(_ context.Context, _ *mcp.CallToolRequest, in proxiesInput) (*mcp.CallToolResult, proxiesOutput, error) {
-	return pool(s.svc.SetSavedProxies(in.Proxies))
-}
-
 type testProxiesInput struct {
-	Proxies      []string `json:"proxies,omitempty" jsonschema:"proxies to test; the saved pool when empty"`
-	RemoveFailed bool     `json:"remove_failed,omitempty" jsonschema:"remove failing proxies from the saved pool"`
+	Proxies      []string `json:"proxies,omitempty" jsonschema:"proxies to test; leave empty to test the saved ones"`
+	RemoveFailed bool     `json:"remove_failed,omitempty" jsonschema:"delete saved proxies that fail"`
 }
 
 type testProxiesOutput struct {
@@ -517,7 +737,7 @@ func (s *Server) mcpTestProxies(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 
 	if len(proxies) == 0 {
-		return nil, testProxiesOutput{}, errors.New("no proxies to test: the saved pool is empty")
+		return nil, testProxiesOutput{}, errors.New("there are no saved proxies to test. Add some with add_proxies")
 	}
 
 	out := testProxiesOutput{Results: TestProxies(ctx, proxies)}
@@ -546,13 +766,16 @@ func (s *Server) mcpTestProxies(ctx context.Context, _ *mcp.CallToolRequest, in 
 
 // ---------- campaigns
 
+type campaignRef struct {
+	Campaign string `json:"campaign" jsonschema:"campaign name or id"`
+}
+
 type campaignSummary struct {
 	ID         string `json:"id"`
 	Name       string `json:"name"`
-	CreatedAt  string `json:"created_at"`
 	Jobs       int    `json:"jobs"`
-	EmailReady bool   `json:"email_ready"`
-	LastStatus string `json:"last_dispatch_status,omitempty"`
+	EmailReady bool   `json:"email_configured"`
+	LastSend   string `json:"last_send,omitempty"`
 }
 
 type listCampaignsOutput struct {
@@ -567,10 +790,7 @@ func (s *Server) mcpListCampaigns(ctx context.Context, _ *mcp.CallToolRequest, _
 
 	out := listCampaignsOutput{Campaigns: make([]campaignSummary, 0, len(items))}
 	for _, c := range items {
-		out.Campaigns = append(out.Campaigns, campaignSummary{
-			ID: c.ID, Name: c.Name, CreatedAt: c.CreatedAt.UTC().Format(time.RFC3339),
-			Jobs: c.JobCount, EmailReady: c.MailReady, LastStatus: c.LastStatus,
-		})
+		out.Campaigns = append(out.Campaigns, campaignSummary{ID: c.ID, Name: c.Name, Jobs: c.JobCount, EmailReady: c.MailReady, LastSend: c.LastStatus})
 	}
 
 	return nil, out, nil
@@ -580,7 +800,7 @@ type mailView struct {
 	Host        string `json:"smtp_host"`
 	Port        int    `json:"smtp_port"`
 	Username    string `json:"smtp_username,omitempty"`
-	PasswordSet bool   `json:"password_set"`
+	PasswordSet bool   `json:"password_saved"`
 	Encryption  string `json:"encryption"`
 	FromEmail   string `json:"from_email"`
 	FromName    string `json:"from_name,omitempty"`
@@ -590,26 +810,26 @@ type mailView struct {
 }
 
 type dispatchView struct {
-	Status     string `json:"status"`
-	StartedAt  string `json:"started_at"`
-	FinishedAt string `json:"finished_at,omitempty"`
-	Sent       int    `json:"sent"`
-	Failed     int    `json:"failed"`
-	Skipped    int    `json:"skipped"`
-	Detail     string `json:"detail,omitempty"`
+	Status    string `json:"status"`
+	StartedAt string `json:"started_at"`
+	Sent      int    `json:"sent"`
+	Failed    int    `json:"failed"`
+	Skipped   int    `json:"skipped"`
+	Detail    string `json:"detail,omitempty"`
 }
 
 type campaignDetail struct {
-	ID               string         `json:"id"`
-	Name             string         `json:"name"`
-	Jobs             []jobSummary   `json:"jobs"`
-	Email            mailView       `json:"email"`
-	RecipientsReady  int            `json:"recipients_ready"`
-	AlreadySent      int            `json:"already_sent"`
-	JobsWithoutFile  int            `json:"jobs_without_results"`
-	DispatchRunning  bool           `json:"dispatch_running"`
-	Dispatches       []dispatchView `json:"dispatches"`
-	RecipientWarning string         `json:"recipient_warning,omitempty"`
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Jobs            []jobView      `json:"jobs"`
+	Email           mailView       `json:"email"`
+	ReadyToSend     int            `json:"addresses_ready_to_send"`
+	AlreadySent     int            `json:"addresses_already_sent"`
+	JobsWithoutFile int            `json:"jobs_without_results"`
+	Sending         bool           `json:"sending_now"`
+	History         []dispatchView `json:"send_history"`
+	Warning         string         `json:"warning,omitempty"`
+	NextStep        string         `json:"next_step"`
 }
 
 func (s *Server) campaignDetail(ctx context.Context, id string) (campaignDetail, error) {
@@ -639,9 +859,9 @@ func (s *Server) campaignDetail(ctx context.Context, id string) (campaignDetail,
 	}
 
 	d := campaignDetail{
-		ID: c.ID, Name: c.Name, DispatchRunning: running,
-		Jobs:       make([]jobSummary, 0, len(jobs)),
-		Dispatches: make([]dispatchView, 0, len(dispatches)),
+		ID: c.ID, Name: c.Name, Sending: running,
+		Jobs:    make([]jobView, 0, len(jobs)),
+		History: make([]dispatchView, 0, len(dispatches)),
 		Email: mailView{
 			Host: mail.Host, Port: mail.Port, Username: mail.Username, PasswordSet: passwordSet,
 			Encryption: string(mail.Encryption), FromEmail: mail.FromEmail, FromName: mail.FromName,
@@ -650,32 +870,46 @@ func (s *Server) campaignDetail(ctx context.Context, id string) (campaignDetail,
 	}
 
 	for i := range jobs {
-		d.Jobs = append(d.Jobs, s.summarize(&jobs[i]))
+		jobs[i].CampaignName = c.Name
+		d.Jobs = append(d.Jobs, s.view(&jobs[i], false))
 	}
 
 	for i := range dispatches {
-		v := dispatchView{
+		d.History = append(d.History, dispatchView{
 			Status: dispatches[i].Status, StartedAt: dispatches[i].StartedAt.UTC().Format(time.RFC3339),
 			Sent: dispatches[i].Sent, Failed: dispatches[i].Failed, Skipped: dispatches[i].Skipped, Detail: dispatches[i].Detail,
-		}
-		if !dispatches[i].FinishedAt.IsZero() {
-			v.FinishedAt = dispatches[i].FinishedAt.UTC().Format(time.RFC3339)
-		}
-
-		d.Dispatches = append(d.Dispatches, v)
+		})
 	}
 
 	if preview, err := s.svc.DispatchPreview(ctx, id); err != nil {
-		d.RecipientWarning = publicErr(err)
+		d.Warning = publicErr(err)
 	} else {
-		d.RecipientsReady, d.AlreadySent, d.JobsWithoutFile = preview.Ready, preview.AlreadySent, preview.MissingResults
+		d.ReadyToSend, d.AlreadySent, d.JobsWithoutFile = preview.Ready, preview.AlreadySent, preview.MissingResults
+	}
+
+	switch {
+	case len(d.Jobs) == 0:
+		d.NextStep = fmt.Sprintf("The campaign has no jobs. Call create_job with campaign=%q, or add_job_to_campaign.", c.Name)
+	case running:
+		d.NextStep = "Emails are being sent now. Call get_campaign again in a minute to follow it."
+	case mail.Host == "" || mail.Subject == "" || mail.Body == "" || !passwordSet:
+		d.NextStep = fmt.Sprintf("Email is not set up. Call configure_campaign_email with campaign=%q.", c.Name)
+	case d.ReadyToSend > 0:
+		d.NextStep = fmt.Sprintf("%d addresses are ready. Check with preview_campaign_email, then ask the user before start_campaign_dispatch.", d.ReadyToSend)
+	default:
+		d.NextStep = "No addresses are waiting to be sent."
 	}
 
 	return d, nil
 }
 
-func (s *Server) mcpGetCampaign(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, campaignDetail, error) {
-	d, err := s.campaignDetail(ctx, in.ID)
+func (s *Server) mcpGetCampaign(ctx context.Context, _ *mcp.CallToolRequest, in campaignRef) (*mcp.CallToolResult, campaignDetail, error) {
+	c, err := s.findCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, campaignDetail{}, err
+	}
+
+	d, err := s.campaignDetail(ctx, c.ID)
 
 	return nil, d, err
 }
@@ -685,7 +919,14 @@ type nameInput struct {
 }
 
 func (s *Server) mcpCreateCampaign(ctx context.Context, _ *mcp.CallToolRequest, in nameInput) (*mcp.CallToolResult, campaignDetail, error) {
-	c := Campaign{ID: uuid.NewV4().String(), Name: in.Name}
+	if existing, err := s.findCampaign(ctx, in.Name); err == nil {
+		d, err := s.campaignDetail(ctx, existing.ID)
+		d.Warning = "A campaign with this name already exists; returning it instead of creating another."
+
+		return nil, d, err
+	}
+
+	c := Campaign{ID: uuid.NewV4().String(), Name: strings.TrimSpace(in.Name)}
 	if err := s.svc.CreateCampaign(ctx, &c); err != nil {
 		return nil, campaignDetail{}, errors.New(publicErr(err))
 	}
@@ -696,61 +937,101 @@ func (s *Server) mcpCreateCampaign(ctx context.Context, _ *mcp.CallToolRequest, 
 }
 
 type renameInput struct {
-	ID   string `json:"id" jsonschema:"the campaign ID"`
-	Name string `json:"name" jsonschema:"new campaign name"`
+	Campaign string `json:"campaign" jsonschema:"current campaign name or id"`
+	NewName  string `json:"new_name" jsonschema:"the new name"`
 }
 
 func (s *Server) mcpRenameCampaign(ctx context.Context, _ *mcp.CallToolRequest, in renameInput) (*mcp.CallToolResult, message, error) {
-	if err := s.svc.RenameCampaign(ctx, in.ID, in.Name); err != nil {
+	c, err := s.findCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	if err := s.svc.RenameCampaign(ctx, c.ID, in.NewName); err != nil {
 		return nil, message{}, errors.New(publicErr(err))
 	}
 
-	return nil, message{Message: "campaign renamed"}, nil
+	return nil, message{Message: fmt.Sprintf("Campaign renamed to %q.", strings.TrimSpace(in.NewName))}, nil
 }
 
-func (s *Server) mcpDeleteCampaign(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, message, error) {
-	if err := s.svc.DeleteCampaign(ctx, in.ID); err != nil {
+func (s *Server) mcpDeleteCampaign(ctx context.Context, _ *mcp.CallToolRequest, in campaignRef) (*mcp.CallToolResult, message, error) {
+	c, err := s.findCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	if err := s.svc.DeleteCampaign(ctx, c.ID); err != nil {
 		return nil, message{}, errors.New(publicErr(err))
 	}
 
-	return nil, message{Message: "campaign deleted; its jobs were kept"}, nil
+	return nil, message{Message: fmt.Sprintf("Campaign %q deleted. Its jobs were kept.", c.Name)}, nil
 }
 
 type assignInput struct {
-	CampaignID string `json:"campaign_id" jsonschema:"the campaign ID"`
-	JobID      string `json:"job_id" jsonschema:"the job ID"`
+	Campaign string `json:"campaign" jsonschema:"campaign name or id"`
+	Job      string `json:"job" jsonschema:"job name or id"`
 }
 
 func (s *Server) mcpAssignJob(ctx context.Context, _ *mcp.CallToolRequest, in assignInput) (*mcp.CallToolResult, message, error) {
-	if err := s.svc.AssignJob(ctx, in.CampaignID, in.JobID); err != nil {
+	j, err := s.findJob(ctx, in.Job)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	c, created, err := s.findOrCreateCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	if err := s.svc.AssignJob(ctx, c.ID, j.ID); err != nil {
 		return nil, message{}, errors.New(publicErr(err))
 	}
 
-	return nil, message{Message: "job added to the campaign"}, nil
+	msg := fmt.Sprintf("Job %q is now in campaign %q.", j.Name, c.Name)
+	if created {
+		msg += " The campaign was created."
+	}
+
+	return nil, message{Message: msg}, nil
 }
 
 func (s *Server) mcpUnassignJob(ctx context.Context, _ *mcp.CallToolRequest, in assignInput) (*mcp.CallToolResult, message, error) {
-	if err := s.svc.UnassignJob(ctx, in.CampaignID, in.JobID); err != nil {
+	j, err := s.findJob(ctx, in.Job)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	c, err := s.findCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, message{}, err
+	}
+
+	if err := s.svc.UnassignJob(ctx, c.ID, j.ID); err != nil {
 		return nil, message{}, errors.New(publicErr(err))
 	}
 
-	return nil, message{Message: "job removed from the campaign"}, nil
+	return nil, message{Message: fmt.Sprintf("Job %q removed from campaign %q.", j.Name, c.Name)}, nil
 }
 
 // ---------- campaign email
 
 type mailInput struct {
-	ID         string  `json:"id" jsonschema:"the campaign ID"`
-	Host       *string `json:"smtp_host,omitempty" jsonschema:"SMTP host, e.g. smtp.gmail.com or mailpit"`
-	Port       *int    `json:"smtp_port,omitempty" jsonschema:"SMTP port, e.g. 587, 465 or 1025"`
-	Username   *string `json:"smtp_username,omitempty" jsonschema:"SMTP login; empty for no login"`
-	Password   *string `json:"smtp_password,omitempty" jsonschema:"SMTP password; omit to keep the saved one"`
+	Campaign   string  `json:"campaign" jsonschema:"campaign name or id"`
+	Host       *string `json:"smtp_host,omitempty" jsonschema:"SMTP server, e.g. smtp.gmail.com"`
+	Port       *int    `json:"smtp_port,omitempty" jsonschema:"SMTP port: 587 (starttls), 465 (ssl) or 25"`
+	Username   *string `json:"smtp_username,omitempty" jsonschema:"SMTP login"`
+	Password   *string `json:"smtp_password,omitempty" jsonschema:"SMTP password; leave out to keep the saved one"`
 	Encryption *string `json:"encryption,omitempty" jsonschema:"starttls, ssl or none"`
-	FromEmail  *string `json:"from_email,omitempty" jsonschema:"sender address"`
+	FromEmail  *string `json:"from_email,omitempty" jsonschema:"sender email address"`
 	FromName   *string `json:"from_name,omitempty" jsonschema:"sender name"`
-	Subject    *string `json:"subject,omitempty" jsonschema:"subject template"`
-	Body       *string `json:"body,omitempty" jsonschema:"body template"`
-	Format     *string `json:"format,omitempty" jsonschema:"plain or html"`
+	Subject    *string `json:"subject,omitempty" jsonschema:"subject, may use {{.Title}}"`
+	Body       *string `json:"body,omitempty" jsonschema:"message text, may use {{.Title}} {{.Address}} {{.Phone}} etc."`
+	Format     *string `json:"format,omitempty" jsonschema:"plain or html, default plain"`
+}
+
+type mailOutput struct {
+	Email    mailView `json:"email"`
+	NextStep string   `json:"next_step"`
 }
 
 func set[T any](dst *T, v *T) {
@@ -759,10 +1040,15 @@ func set[T any](dst *T, v *T) {
 	}
 }
 
-func (s *Server) mcpConfigureMail(ctx context.Context, _ *mcp.CallToolRequest, in mailInput) (*mcp.CallToolResult, mailView, error) {
-	cfg, _, err := s.svc.CampaignMailForForm(ctx, in.ID)
+func (s *Server) mcpConfigureMail(ctx context.Context, _ *mcp.CallToolRequest, in mailInput) (*mcp.CallToolResult, mailOutput, error) {
+	c, err := s.findCampaign(ctx, in.Campaign)
 	if err != nil {
-		return nil, mailView{}, err
+		return nil, mailOutput{}, err
+	}
+
+	cfg, _, err := s.svc.CampaignMailForForm(ctx, c.ID)
+	if err != nil {
+		return nil, mailOutput{}, err
 	}
 
 	set(&cfg.Host, in.Host)
@@ -775,99 +1061,165 @@ func (s *Server) mcpConfigureMail(ctx context.Context, _ *mcp.CallToolRequest, i
 	set(&cfg.Body, in.Body)
 
 	if in.Encryption != nil {
-		cfg.Encryption = MailEncryption(*in.Encryption)
+		cfg.Encryption = MailEncryption(strings.ToLower(strings.TrimSpace(*in.Encryption)))
 	}
 
 	if in.Format != nil {
-		cfg.Format = MailFormat(*in.Format)
+		cfg.Format = MailFormat(strings.ToLower(strings.TrimSpace(*in.Format)))
 	}
 
-	if err := s.svc.SaveCampaignMail(ctx, in.ID, &cfg); err != nil {
-		return nil, mailView{}, errors.New(publicErr(err))
+	if err := s.svc.SaveCampaignMail(ctx, c.ID, &cfg); err != nil {
+		return nil, mailOutput{}, errors.New(publicErr(err))
 	}
 
-	d, err := s.campaignDetail(ctx, in.ID)
+	d, err := s.campaignDetail(ctx, c.ID)
+	if err != nil {
+		return nil, mailOutput{}, err
+	}
 
-	return nil, d.Email, err
+	next := fmt.Sprintf("Saved. Call test_campaign_smtp and preview_campaign_email with campaign=%q.", c.Name)
+	if missing := missingMailFields(&d.Email); missing != "" {
+		next = "Saved, but still missing: " + missing + ". Call configure_campaign_email again with those fields."
+	}
+
+	return nil, mailOutput{Email: d.Email, NextStep: next}, nil
 }
 
-// savedMail returns the stored settings. The service fills in the saved password.
-func (s *Server) savedMail(ctx context.Context, id string) (MailConfig, error) {
-	if _, err := s.svc.GetCampaign(ctx, id); err != nil {
-		return MailConfig{}, errors.New(publicErr(err))
+func missingMailFields(m *mailView) string {
+	var missing []string
+
+	for _, f := range []struct {
+		name string
+		ok   bool
+	}{
+		{"smtp_host", m.Host != ""}, {"smtp_password", m.PasswordSet}, {"from_email", m.FromEmail != ""},
+		{"subject", m.Subject != ""}, {"body", m.Body != ""},
+	} {
+		if !f.ok {
+			missing = append(missing, f.name)
+		}
 	}
 
-	cfg, _, err := s.svc.CampaignMailForForm(ctx, id)
-
-	return cfg, err
+	return strings.Join(missing, ", ")
 }
 
-func (s *Server) mcpCheckMail(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, message, error) {
-	cfg, err := s.savedMail(ctx, in.ID)
+// savedMail returns the campaign and its stored settings. The service fills in the saved password.
+func (s *Server) savedMail(ctx context.Context, ref string) (CampaignSummary, MailConfig, error) {
+	c, err := s.findCampaign(ctx, ref)
+	if err != nil {
+		return CampaignSummary{}, MailConfig{}, err
+	}
+
+	cfg, _, err := s.svc.CampaignMailForForm(ctx, c.ID)
+
+	return c, cfg, err
+}
+
+func (s *Server) mcpCheckMail(ctx context.Context, _ *mcp.CallToolRequest, in campaignRef) (*mcp.CallToolResult, message, error) {
+	c, cfg, err := s.savedMail(ctx, in.Campaign)
 	if err != nil {
 		return nil, message{}, err
 	}
 
-	if err := s.svc.CheckCampaignMail(ctx, in.ID, &cfg); err != nil {
-		return nil, message{}, errors.New(publicErr(err))
+	if err := s.svc.CheckCampaignMail(ctx, c.ID, &cfg); err != nil {
+		return nil, message{}, fmt.Errorf("SMTP check failed: %s. Fix it with configure_campaign_email", publicErr(err))
 	}
 
-	return nil, message{Message: "SMTP connection succeeded"}, nil
+	return nil, message{Message: "SMTP connection and login work."}, nil
 }
 
 type previewOutput struct {
-	Subject string `json:"subject"`
-	Body    string `json:"body"`
-	HTML    bool   `json:"html"`
+	Subject  string `json:"subject"`
+	Body     string `json:"body"`
+	HTML     bool   `json:"html"`
+	NextStep string `json:"next_step"`
 }
 
-func (s *Server) mcpPreviewMail(ctx context.Context, _ *mcp.CallToolRequest, in idInput) (*mcp.CallToolResult, previewOutput, error) {
-	cfg, err := s.savedMail(ctx, in.ID)
+func (s *Server) mcpPreviewMail(ctx context.Context, _ *mcp.CallToolRequest, in campaignRef) (*mcp.CallToolResult, previewOutput, error) {
+	c, cfg, err := s.savedMail(ctx, in.Campaign)
 	if err != nil {
 		return nil, previewOutput{}, err
 	}
 
-	subject, body, err := s.svc.PreviewCampaignMail(ctx, in.ID, &cfg)
+	subject, body, err := s.svc.PreviewCampaignMail(ctx, c.ID, &cfg)
 	if err != nil {
-		return nil, previewOutput{}, errors.New(publicErr(err))
+		return nil, previewOutput{}, fmt.Errorf("%s. Fix it with configure_campaign_email", publicErr(err))
 	}
 
-	return nil, previewOutput{Subject: subject, Body: body, HTML: cfg.Format == MailFormatHTML}, nil
+	return nil, previewOutput{
+		Subject: subject, Body: body, HTML: cfg.Format == MailFormatHTML,
+		NextStep: "Show this preview to the user. To check delivery, call send_test_email.",
+	}, nil
 }
 
 type testMailInput struct {
-	ID string `json:"id" jsonschema:"the campaign ID"`
-	To string `json:"to" jsonschema:"address that receives the test"`
+	Campaign string `json:"campaign" jsonschema:"campaign name or id"`
+	To       string `json:"to" jsonschema:"email address that receives the test"`
 }
 
 func (s *Server) mcpSendTestMail(ctx context.Context, _ *mcp.CallToolRequest, in testMailInput) (*mcp.CallToolResult, message, error) {
-	cfg, err := s.savedMail(ctx, in.ID)
+	c, cfg, err := s.savedMail(ctx, in.Campaign)
 	if err != nil {
 		return nil, message{}, err
 	}
 
-	if err := s.svc.SendTestMail(ctx, in.ID, &cfg, in.To, s.sendMail); err != nil {
-		return nil, message{}, errors.New(publicErr(err))
+	if err := s.svc.SendTestMail(ctx, c.ID, &cfg, in.To, s.sendMail); err != nil {
+		return nil, message{}, fmt.Errorf("test email not sent: %s", publicErr(err))
 	}
 
-	return nil, message{Message: "test email sent to " + in.To}, nil
+	return nil, message{Message: "Test email sent to " + in.To + "."}, nil
 }
 
 type dispatchInput struct {
-	ID     string `json:"id" jsonschema:"the campaign ID"`
-	Resend bool   `json:"resend,omitempty" jsonschema:"also send to addresses that already received this campaign"`
+	Campaign string `json:"campaign" jsonschema:"campaign name or id"`
+	Confirm  bool   `json:"confirm,omitempty" jsonschema:"true to really send; only after the user agreed"`
+	Resend   bool   `json:"resend,omitempty" jsonschema:"also send to addresses that already got this campaign"`
 }
 
 type dispatchOutput struct {
-	Started bool   `json:"started"`
-	Detail  string `json:"detail"`
+	Sent        bool   `json:"started"`
+	ReadyToSend int    `json:"addresses_ready_to_send"`
+	Detail      string `json:"detail"`
+	NextStep    string `json:"next_step"`
 }
 
 func (s *Server) mcpStartDispatch(ctx context.Context, _ *mcp.CallToolRequest, in dispatchInput) (*mcp.CallToolResult, dispatchOutput, error) {
-	res, err := s.svc.StartDispatch(ctx, in.ID, in.Resend, s.sendMail)
+	c, err := s.findCampaign(ctx, in.Campaign)
+	if err != nil {
+		return nil, dispatchOutput{}, err
+	}
+
+	d, err := s.campaignDetail(ctx, c.ID)
+	if err != nil {
+		return nil, dispatchOutput{}, err
+	}
+
+	if missing := missingMailFields(&d.Email); missing != "" {
+		return nil, dispatchOutput{}, fmt.Errorf("email is not set up, missing: %s. Call configure_campaign_email first", missing)
+	}
+
+	ready := d.ReadyToSend
+	if in.Resend {
+		ready += d.AlreadySent
+	}
+
+	if !in.Confirm {
+		return nil, dispatchOutput{
+			ReadyToSend: ready,
+			Detail:      fmt.Sprintf("Nothing was sent. %d addresses would get the email %q from %s.", ready, d.Email.Subject, d.Email.FromEmail),
+			NextStep:    "Ask the user to confirm. Only if they agree, call start_campaign_dispatch again with confirm=true.",
+		}, nil
+	}
+
+	res, err := s.svc.StartDispatch(ctx, c.ID, in.Resend, s.sendMail)
 	if err != nil {
 		return nil, dispatchOutput{}, errors.New(publicErr(err))
 	}
 
-	return nil, dispatchOutput(res), nil
+	out := dispatchOutput{Sent: res.Started, ReadyToSend: ready, Detail: res.Detail, NextStep: "Nothing to send."}
+	if res.Started {
+		out.NextStep = fmt.Sprintf("Sending in the background, in batches with pauses. Call get_campaign with campaign=%q to follow it.", c.Name)
+	}
+
+	return nil, out, nil
 }

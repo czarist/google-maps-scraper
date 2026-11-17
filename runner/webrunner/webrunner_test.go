@@ -44,6 +44,7 @@ func TestScrapeJobMarksOKBeforeClosingMate(t *testing.T) {
 		cfg: &runner.Config{DataFolder: t.TempDir(), Concurrency: 1},
 		setupMate: func(_ context.Context, _ io.Writer, _ *web.Job) (mateRunner, error) {
 			return fakeMate{
+				onStart: func() { svc.AddProgress(job.ID, 3) },
 				onClose: func() {
 					got, err := svc.Get(context.Background(), job.ID)
 					if err != nil {
@@ -64,10 +65,15 @@ func TestScrapeJobMarksOKBeforeClosingMate(t *testing.T) {
 }
 
 type fakeMate struct {
+	onStart func()
 	onClose func()
 }
 
 func (m fakeMate) Start(context.Context, ...scrapemate.IJob) error {
+	if m.onStart != nil {
+		m.onStart()
+	}
+
 	return nil
 }
 
@@ -77,6 +83,45 @@ func (m fakeMate) Close() error {
 	}
 
 	return nil
+}
+
+func TestScrapeJobWithNoPlacesFails(t *testing.T) {
+	t.Parallel()
+
+	repo := &memoryJobRepo{}
+	svc := web.NewService(repo, t.TempDir())
+	job := web.Job{
+		ID:     "job-2",
+		Name:   "nothing",
+		Date:   time.Now().UTC(),
+		Status: web.StatusPending,
+		Data:   web.JobData{Keywords: []string{"x"}, Lang: "en", Zoom: 15, Depth: 1, MaxTime: time.Minute},
+	}
+
+	if err := svc.Create(context.Background(), &job); err != nil {
+		t.Fatalf("create job: %v", err)
+	}
+
+	w := &webrunner{
+		svc: svc,
+		cfg: &runner.Config{DataFolder: t.TempDir(), Concurrency: 1},
+		setupMate: func(context.Context, io.Writer, *web.Job) (mateRunner, error) {
+			return fakeMate{}, nil
+		},
+	}
+
+	if err := w.scrapeJob(context.Background(), &job); err != nil {
+		t.Fatalf("scrape job: %v", err)
+	}
+
+	got, err := svc.Get(context.Background(), job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != web.StatusFailed || got.Data.Run.Error == "" {
+		t.Fatalf("status = %q, error = %q; want failed with a reason", got.Status, got.Data.Run.Error)
+	}
 }
 
 type memoryJobRepo struct {

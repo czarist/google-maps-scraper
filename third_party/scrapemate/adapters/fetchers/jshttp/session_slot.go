@@ -80,7 +80,11 @@ func (s *sessionSlot) acquirePage(ctx context.Context) (page, error) {
 
 	if err := s.runtime.recreatePage(); err != nil {
 		if err := s.runtime.recreateContext(); err != nil {
-			return nil, s.runtime.recreateBrowser()
+			// A fresh browser still needs its page fetched below. Returning here
+			// handed callers a nil page with no error.
+			if err := s.runtime.recreateBrowser(); err != nil {
+				return nil, err
+			}
 		}
 	}
 
