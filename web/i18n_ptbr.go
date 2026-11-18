@@ -11,7 +11,6 @@ var ptBR = map[string]string{
 	"Jobs":                   "Tarefas",
 	"Campaigns":              "Campanhas",
 	"API documentation":      "Documentação da API",
-	"Star on GitHub":         "Estrela no GitHub",
 	"Dark mode":              "Modo escuro",
 	"Light mode":             "Modo claro",
 	"Actions":                "Ações",
@@ -248,8 +247,17 @@ var ptBR = map[string]string{
 
 	// Server notices and errors shown in the campaign pages
 	// Sending services and unsubscribe
-	"Save":             "Salvar",
-	"Name":             "Nome",
+	"Save":          "Salvar",
+	"Name":          "Nome",
+	"Campaigns: %d": "Campanhas: %d",
+	"Each campaign sends as one service. Unsubscribes apply per service.":                                                    "Cada campanha envia como um serviço. O descadastro vale por serviço.",
+	"Register a service that already exists on the unsubscribe site. The name is checked there and cannot be changed later.": "Cadastre um serviço que já existe no site de descadastro. O nome é conferido lá e não pode ser alterado depois.",
+	"Same as servico_nome. Lowercase letters, digits, - and _.":                                                              "Igual ao servico_nome. Letras minúsculas, números, - e _.",
+	"Shown in the campaign forms. Empty uses the name.":                                                                      "Aparece nos formulários de campanha. Vazio usa o nome.",
+	"optional":         "opcional",
+	"New service":      "Novo serviço",
+	"Manage services":  "Gerenciar serviços",
+	"Unsubscribed":     "Descadastrado",
 	"Campaign saved":   "Campanha salva",
 	"Service":          "Serviço",
 	"Services":         "Serviços",

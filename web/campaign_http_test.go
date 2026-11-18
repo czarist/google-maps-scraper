@@ -68,6 +68,12 @@ func TestCampaignPagesHidePassword(t *testing.T) {
 	if !strings.Contains(body, "smtp.secret.test") || !strings.Contains(body, "A password is saved") {
 		t.Fatalf("page missing mail form: %s", body)
 	}
+
+	for _, svc := range DefaultServices {
+		if !strings.Contains(body, `<option value="`+svc.Name+`"`) {
+			t.Fatalf("service select has no %s option", svc.Name)
+		}
+	}
 }
 
 func TestPreviewMailDoesNotEchoPassword(t *testing.T) {
@@ -162,8 +168,10 @@ func TestCreateCampaignRedirects(t *testing.T) {
 
 type memStore struct {
 	mockJobRepo
-	mu         sync.Mutex
-	campaigns  map[string]Campaign
+	mu        sync.Mutex
+	campaigns map[string]Campaign
+	// order keeps creation order, so lists are stable like the SQLite store.
+	order      []string
 	members    map[string][]string
 	jobCamp    map[string]string
 	mail       map[string]MailConfig
@@ -279,6 +287,10 @@ func (m *memStore) CreateCampaign(_ context.Context, c *Campaign) error {
 	defer m.mu.Unlock()
 
 	copied := *c
+	if _, ok := m.campaigns[c.ID]; !ok {
+		m.order = append(m.order, c.ID)
+	}
+
 	m.campaigns[c.ID] = copied
 
 	return nil
@@ -289,7 +301,13 @@ func (m *memStore) ListCampaigns(context.Context) ([]CampaignSummary, error) {
 	defer m.mu.Unlock()
 
 	out := make([]CampaignSummary, 0, len(m.campaigns))
-	for _, c := range m.campaigns {
+
+	for _, id := range m.order {
+		c, ok := m.campaigns[id]
+		if !ok {
+			continue
+		}
+
 		_, ready := m.mail[c.ID]
 		out = append(out, CampaignSummary{Campaign: c, JobCount: len(m.members[c.ID]), MailReady: ready})
 	}

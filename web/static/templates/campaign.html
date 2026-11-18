@@ -28,7 +28,6 @@
             <a href="/">{{t "Jobs"}}</a>
             <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
             <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
-            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "Star on GitHub"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
                 <span class="theme-label-dark">{{t "Dark mode"}}</span>
                 <span class="theme-label-light">{{t "Light mode"}}</span>
@@ -167,7 +166,7 @@
                     <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
                 </div>
                 <div class="field">
-                    <label for="campaign-service">{{t "Service"}}</label>
+                    <label for="campaign-service">{{t "Service"}} · <a href="/campaigns#services">{{t "Manage services"}}</a></label>
                     <select id="campaign-service" name="servico" required>
                         {{range .Services}}<option value="{{.Name}}"{{if eq .Name $.Campaign.ServiceName}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
                     </select>
@@ -239,31 +238,37 @@
                 </div>
             </form>
 
-            <h3>{{t "History"}}</h3>
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
+                <button type="submit" class="btn-danger">{{t "Delete campaign"}}</button>
+            </form>
+        </section>
+
+        <section class="panel panel-history" aria-labelledby="history-title">
+            <h2 id="history-title">{{t "History"}}</h2>
             <div class="table-wrap" id="live-history">
-                <table>
+                <table class="history-list">
                     <thead>
                         <tr>
                             <th scope="col">{{t "Started (UTC)"}}</th>
                             <th scope="col">{{t "Status"}}</th>
-                            <th scope="col">{{t "Sent"}}</th>
-                            <th scope="col">{{t "Failed"}}</th>
-                            <th scope="col">{{t "Skipped"}}</th>
-                            <th scope="col">{{t "Detail"}}</th>
                         </tr>
                     </thead>
                     <tbody>
                         {{range .Dispatches}}
                         <tr>
-                            <td>{{.StartedLabel}}</td>
-                            <td>{{if eq .Status "running"}}{{t "Sending"}}{{else if eq .Status "ok"}}{{t "Sent"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</td>
-                            <td>{{.Sent}}</td>
-                            <td>{{.Failed}}</td>
-                            <td>{{.Skipped}}</td>
-                            <td class="history-detail">{{t .Detail}}</td>
+                            <td data-label="{{t "Started (UTC)"}}">
+                                <span class="history-when">{{.StartedLabel}}</span>
+                                {{if .Detail}}<p class="run-line history-detail">{{t .Detail}}</p>{{end}}
+                            </td>
+                            <td data-label="{{t "Status"}}" class="history-result">
+                                {{if eq .Status "running"}}<span class="status status-working">{{t "Sending"}}</span>
+                                {{else if eq .Status "ok"}}<span class="status status-ok">{{t "Sent"}}</span>
+                                {{else if eq .Status "failed"}}<span class="status status-failed">{{t "Failed"}}</span>
+                                {{else}}<span class="status">{{.Status}}</span>{{end}}
+                            </td>
                         </tr>
                         {{else}}
-                        <tr class="empty-row"><td colspan="6">{{t "No dispatches yet."}}</td></tr>
+                        <tr class="empty-row"><td colspan="2">{{t "No dispatches yet."}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>
@@ -286,6 +291,7 @@
                             <td data-label="{{t "Email"}}" class="mail-address">{{.Email}}<span class="job-id">{{.SentLabel}} UTC</span></td>
                             <td data-label="{{t "Result"}}">
                                 {{if eq .Status "sent"}}<span class="status status-ok">{{t "Accepted"}}</span>
+                                {{else if eq .Status "unsubscribed"}}<span class="status status-pending">{{t "Unsubscribed"}}</span>
                                 {{else}}<span class="status status-failed">{{t "Failed"}}</span>
                                 {{if .Error}}<p class="run-line mail-error">{{.Error}}</p>{{end}}{{end}}
                             </td>
@@ -297,10 +303,6 @@
                 </table>
             </div>
             </div>
-
-            <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
-                <button type="submit" class="btn-danger">{{t "Delete campaign"}}</button>
-            </form>
         </section>
     </main>
     <script>

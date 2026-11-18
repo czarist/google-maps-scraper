@@ -28,7 +28,6 @@
             <a href="/">{{t "Jobs"}}</a>
             <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
             <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
-            <a href="https://github.com/gosom/google-maps-scraper" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "Star on GitHub"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
                 <span class="theme-label-dark">{{t "Dark mode"}}</span>
                 <span class="theme-label-light">{{t "Light mode"}}</span>
@@ -63,95 +62,89 @@
             </form>
         </section>
 
-        <section class="panel" aria-labelledby="list-title">
-            <div class="jobs-head">
-                <h2 id="list-title">{{t "Campaigns"}}</h2>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">{{t "Campaign"}}</th>
-                            <th scope="col">{{t "Service"}}</th>
-                            <th scope="col">{{t "Jobs"}}</th>
-                            <th scope="col">{{t "Email"}}</th>
-                            <th scope="col">{{t "Last dispatch"}}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .Campaigns}}
-                        <tr>
-                            <td data-label="{{t "Campaign"}}"><a href="/campaigns/{{.ID}}">{{.Name}}</a></td>
-                            <td data-label="{{t "Service"}}">{{.ServiceName}}</td>
-                            <td data-label="{{t "Jobs"}}">{{.JobCount}}</td>
-                            <td data-label="{{t "Email"}}">{{if .MailReady}}{{t "Ready"}}{{else}}{{t "Not ready"}}{{end}}</td>
-                            <td data-label="{{t "Last dispatch"}}">{{if eq .LastStatus "running"}}{{t "Sending"}}{{else if eq .LastStatus "ok"}}{{t "Sent"}}{{else if eq .LastStatus "failed"}}{{t "Failed"}}{{else}}{{t "Not sent"}}{{end}}</td>
-                        </tr>
-                        {{else}}
-                        <tr class="empty-row">
-                            <td colspan="5">{{t "No campaigns yet. Create one with the form."}}</td>
-                        </tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </div>
-        </section>
+        <div class="layout-stack">
+            <section class="panel" aria-labelledby="list-title">
+                <div class="jobs-head">
+                    <h2 id="list-title">{{t "Campaigns"}}</h2>
+                </div>
+                <div class="table-wrap">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col">{{t "Campaign"}}</th>
+                                <th scope="col">{{t "Service"}}</th>
+                                <th scope="col">{{t "Jobs"}}</th>
+                                <th scope="col">{{t "Email"}}</th>
+                                <th scope="col">{{t "Last dispatch"}}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Campaigns}}
+                            <tr>
+                                <td data-label="{{t "Campaign"}}"><a href="/campaigns/{{.ID}}">{{.Name}}</a></td>
+                                <td data-label="{{t "Service"}}">{{.ServiceName}}</td>
+                                <td data-label="{{t "Jobs"}}">{{.JobCount}}</td>
+                                <td data-label="{{t "Email"}}">{{if .MailReady}}{{t "Ready"}}{{else}}{{t "Not ready"}}{{end}}</td>
+                                <td data-label="{{t "Last dispatch"}}">{{if eq .LastStatus "running"}}{{t "Sending"}}{{else if eq .LastStatus "ok"}}{{t "Sent"}}{{else if eq .LastStatus "failed"}}{{t "Failed"}}{{else}}{{t "Not sent"}}{{end}}</td>
+                            </tr>
+                            {{else}}
+                            <tr class="empty-row">
+                                <td colspan="5">{{t "No campaigns yet. Create one with the form."}}</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
 
-        <section class="panel" aria-labelledby="services-title">
-            <div class="jobs-head">
-                <h2 id="services-title">{{t "Services"}}</h2>
-            </div>
-            <p class="hint">{{t "The name must match servico_nome on the unsubscribe site. It is checked when the service is created and cannot be changed later."}}</p>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">{{t "Name"}}</th>
-                            <th scope="col">{{t "Label"}}</th>
-                            <th scope="col">{{t "Campaigns"}}</th>
-                            <th scope="col">{{t "Actions"}}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .Services}}
-                        <tr>
-                            <td data-label="{{t "Name"}}"><code>{{.Name}}</code></td>
-                            <td data-label="{{t "Label"}}">
-                                <form class="form-inline" method="post" action="/campaigns/services/{{.Name}}/update">
-                                    <input type="text" name="service_label" value="{{.Label}}" maxlength="120" aria-label="{{t "Label"}}" required>
-                                    <button type="submit" class="btn-quiet">{{t "Save"}}</button>
-                                </form>
-                            </td>
-                            <td data-label="{{t "Campaigns"}}">{{.Campaigns}}</td>
-                            <td class="actions">
-                                {{if eq .Campaigns 0}}
-                                <form class="form-inline" method="post" action="/campaigns/services/{{.Name}}/delete">
-                                    <button type="submit" class="btn-quiet">{{t "Delete"}}</button>
-                                </form>
-                                {{else}}<span class="hint">{{t "In use"}}</span>{{end}}
-                            </td>
-                        </tr>
-                        {{else}}
-                        <tr class="empty-row"><td colspan="4">{{t "No services yet."}}</td></tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </div>
+            <section class="panel" id="services" aria-labelledby="services-title">
+                <div class="jobs-head">
+                    <h2 id="services-title">{{t "Services"}}</h2>
+                </div>
+                <p class="hint">{{t "Each campaign sends as one service. Unsubscribes apply per service."}}</p>
+                <ul class="service-list">
+                    {{range .Services}}
+                    <li class="service-item">
+                    <div class="service-id">
+                        <code>{{.Name}}</code>
+                        <span class="hint">{{t "Campaigns: %d" .Campaigns}}</span>
+                    </div>
+                    <form class="service-edit" method="post" action="/campaigns/services/{{.Name}}/update">
+                        <input type="text" name="service_label" value="{{.Label}}" maxlength="120" aria-label="{{t "Label"}} {{.Name}}" required>
+                        <button type="submit" class="btn-quiet">{{t "Save"}}</button>
+                    </form>
+                    <div class="service-action">
+                        {{if eq .Campaigns 0}}
+                        <form method="post" action="/campaigns/services/{{.Name}}/delete">
+                            <button type="submit" class="btn-quiet">{{t "Delete"}}</button>
+                        </form>
+                        {{else}}<span class="status status-ok">{{t "In use"}}</span>{{end}}
+                    </div>
+                </li>
+                    {{else}}
+                    <li class="service-item hint">{{t "No services yet."}}</li>
+                    {{end}}
+                </ul>
 
-            <form method="post" action="/campaigns/services">
-                <div class="field">
-                    <label for="service-name">{{t "Service name"}}</label>
-                    <input type="text" id="service-name" name="service_name" required maxlength="64" pattern="[a-z0-9_\-]+" autocomplete="off" placeholder="trentin">
+                <div class="service-new-box">
+                    <h3 id="new-service-title">{{t "New service"}}</h3>
+                    <p class="hint">{{t "Register a service that already exists on the unsubscribe site. The name is checked there and cannot be changed later."}}</p>
+                    <form class="service-new" method="post" action="/campaigns/services" aria-labelledby="new-service-title">
+                        <div class="field">
+                            <label for="service-name">{{t "Service name"}}</label>
+                            <input type="text" id="service-name" name="service_name" required maxlength="64" pattern="[a-z0-9_\-]+" autocomplete="off" spellcheck="false" placeholder="splitquota" aria-describedby="service-name-hint">
+                            <p class="hint" id="service-name-hint">{{t "Same as servico_nome. Lowercase letters, digits, - and _."}}</p>
+                        </div>
+                        <div class="field">
+                            <label for="service-label">{{t "Label"}} <span class="optional">({{t "optional"}})</span></label>
+                            <input type="text" id="service-label" name="service_label" maxlength="120" autocomplete="off" placeholder="Splitquota" aria-describedby="service-label-hint">
+                            <p class="hint" id="service-label-hint">{{t "Shown in the campaign forms. Empty uses the name."}}</p>
+                        </div>
+                        <button type="submit" class="btn-primary">{{t "Add service"}}</button>
+                    </form>
                 </div>
-                <div class="field">
-                    <label for="service-label">{{t "Label"}}</label>
-                    <input type="text" id="service-label" name="service_label" maxlength="120" autocomplete="off" placeholder="Trentin">
-                </div>
-                <div class="submit-row">
-                    <button type="submit" class="btn-quiet">{{t "Add service"}}</button>
-                </div>
-            </form>
-        </section>
+            </section>
+        </div>
     </main>
 </body>
 </html>

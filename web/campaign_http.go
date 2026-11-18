@@ -134,7 +134,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		return view, err
 	}
 
-	view.Services, err = s.svc.ListServices(r.Context())
+	services, err := s.svc.ListServices(r.Context())
 	if err != nil {
 		return view, err
 	}
@@ -198,6 +198,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 
 	view = campaignView{
 		Campaign:       campaign,
+		Services:       services,
 		Mail:           mail,
 		PasswordSet:    passwordSet,
 		Jobs:           jobs,
