@@ -426,3 +426,12 @@ func removeID(ids []string, id string) []string {
 
 	return out
 }
+
+func TestParseEmailCellStripsGluedPhone(t *testing.T) {
+	got := parseEmailCell("99885-1359secretaria@colegiojphigi.com.br, 99545-3421contatohigi@colegiojphigi.com.br, secretaria@colegiojphigi.com.br")
+	want := []string{"secretaria@colegiojphigi.com.br", "contatohigi@colegiojphigi.com.br"}
+
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+}

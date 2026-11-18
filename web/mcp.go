@@ -46,7 +46,7 @@ Jobs and campaigns can be referred to by name or by id. Every answer has a next_
 
 // defaultResultColumns are the CSV columns returned unless all columns are asked for.
 var defaultResultColumns = []string{
-	"title", "category", "address", "phone", "website", "emails",
+	"title", "category", "address", "phone", "website", "emails", "website_phones",
 	"review_rating", "review_count", "latitude", "longitude", "link",
 }
 

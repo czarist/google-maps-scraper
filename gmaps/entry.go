@@ -131,6 +131,7 @@ type Entry struct {
 	UserReviews         []Review          `json:"user_reviews"`
 	UserReviewsExtended []Review          `json:"user_reviews_extended"`
 	Emails              []string          `json:"emails"`
+	WebsitePhones       []string          `json:"website_phones,omitempty"`
 	ReviewCollection    *ReviewCollection `json:"review_collection,omitempty"`
 }
 
@@ -271,6 +272,7 @@ func (e *Entry) CsvHeaders() []string {
 		"user_reviews",
 		"user_reviews_extended",
 		"emails",
+		"website_phones",
 		"review_collection",
 	}
 }
@@ -313,6 +315,7 @@ func (e *Entry) CsvRow() []string {
 		stringify(e.UserReviews),
 		stringify(e.UserReviewsExtended),
 		stringSliceToString(e.Emails),
+		stringSliceToString(e.WebsitePhones),
 		stringify(e.ReviewCollection),
 	}
 }

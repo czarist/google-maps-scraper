@@ -100,6 +100,7 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	}
 
 	j.Entry.Emails = emails
+	j.Entry.WebsitePhones = websitePhones(doc)
 
 	return j.Entry, nil, nil
 }
@@ -166,6 +167,9 @@ func cleanEmail(raw string) (string, bool) {
 	if strings.ContainsFunc(email, unicode.IsControl) {
 		return "", false
 	}
+
+	// Sites often print "(51) 99545-3421contato@..." with no space in between.
+	email = StripPhonePrefix(email)
 
 	if len(email) < 5 || len(email) > 254 || !strings.Contains(email, "@") {
 		return "", false

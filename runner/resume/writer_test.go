@@ -30,7 +30,7 @@ func TestCSVAppendWriterWritesHeaderForNewFile(t *testing.T) {
 	require.NoError(t, writer.Run(context.Background(), in))
 
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
-	require.Equal(t, "input_id,link,title,category,address,open_hours,popular_times,website,phone,plus_code,review_count,review_rating,reviews_per_rating,latitude,longitude,cid,status,descriptions,reviews_link,thumbnail,timezone,price_range,data_id,street_view_url,place_id,images,reservations,order_online,menu,owner,complete_address,credit_cards_accepted,about,user_reviews,user_reviews_extended,emails,review_collection", lines[0])
+	require.Equal(t, "input_id,link,title,category,address,open_hours,popular_times,website,phone,plus_code,review_count,review_rating,reviews_per_rating,latitude,longitude,cid,status,descriptions,reviews_link,thumbnail,timezone,price_range,data_id,street_view_url,place_id,images,reservations,order_online,menu,owner,complete_address,credit_cards_accepted,about,user_reviews,user_reviews_extended,emails,website_phones,review_collection", lines[0])
 	require.Len(t, lines, 2)
 	require.True(t, ids.Has("place-a"))
 }

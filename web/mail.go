@@ -15,6 +15,8 @@ import (
 	"strings"
 	"text/template"
 	"time"
+
+	"github.com/gosom/google-maps-scraper/gmaps"
 )
 
 // MailVars is the only data a campaign template can read.
@@ -215,6 +217,9 @@ func parseEmailCell(raw string) []string {
 		if err != nil {
 			continue
 		}
+
+		// Older CSVs may hold "99545-3421contato@..." from before the scraper fixed it.
+		addr = gmaps.StripPhonePrefix(addr)
 
 		key := strings.ToLower(addr)
 		if _, ok := seen[key]; ok {
