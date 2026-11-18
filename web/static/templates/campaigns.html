@@ -50,6 +50,13 @@
                     <label for="campaign-name">{{t "Campaign name"}}</label>
                     <input type="text" id="campaign-name" name="name" required maxlength="200" autocomplete="off" placeholder="{{t "Spring clinics"}}">
                 </div>
+                <div class="field">
+                    <label for="campaign-service">{{t "Service"}}</label>
+                    <select id="campaign-service" name="servico" required>
+                        {{range .Services}}<option value="{{.Name}}"{{if eq .Name "trentin"}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
+                    </select>
+                    <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
+                </div>
                 <div class="submit-row">
                     <button type="submit" class="btn-primary">{{t "Create campaign"}}</button>
                 </div>
@@ -65,6 +72,7 @@
                     <thead>
                         <tr>
                             <th scope="col">{{t "Campaign"}}</th>
+                            <th scope="col">{{t "Service"}}</th>
                             <th scope="col">{{t "Jobs"}}</th>
                             <th scope="col">{{t "Email"}}</th>
                             <th scope="col">{{t "Last dispatch"}}</th>
@@ -74,18 +82,75 @@
                         {{range .Campaigns}}
                         <tr>
                             <td data-label="{{t "Campaign"}}"><a href="/campaigns/{{.ID}}">{{.Name}}</a></td>
+                            <td data-label="{{t "Service"}}">{{.ServiceName}}</td>
                             <td data-label="{{t "Jobs"}}">{{.JobCount}}</td>
                             <td data-label="{{t "Email"}}">{{if .MailReady}}{{t "Ready"}}{{else}}{{t "Not ready"}}{{end}}</td>
                             <td data-label="{{t "Last dispatch"}}">{{if eq .LastStatus "running"}}{{t "Sending"}}{{else if eq .LastStatus "ok"}}{{t "Sent"}}{{else if eq .LastStatus "failed"}}{{t "Failed"}}{{else}}{{t "Not sent"}}{{end}}</td>
                         </tr>
                         {{else}}
                         <tr class="empty-row">
-                            <td colspan="4">{{t "No campaigns yet. Create one with the form."}}</td>
+                            <td colspan="5">{{t "No campaigns yet. Create one with the form."}}</td>
                         </tr>
                         {{end}}
                     </tbody>
                 </table>
             </div>
+        </section>
+
+        <section class="panel" aria-labelledby="services-title">
+            <div class="jobs-head">
+                <h2 id="services-title">{{t "Services"}}</h2>
+            </div>
+            <p class="hint">{{t "The name must match servico_nome on the unsubscribe site. It is checked when the service is created and cannot be changed later."}}</p>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{t "Name"}}</th>
+                            <th scope="col">{{t "Label"}}</th>
+                            <th scope="col">{{t "Campaigns"}}</th>
+                            <th scope="col">{{t "Actions"}}</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Services}}
+                        <tr>
+                            <td data-label="{{t "Name"}}"><code>{{.Name}}</code></td>
+                            <td data-label="{{t "Label"}}">
+                                <form class="form-inline" method="post" action="/campaigns/services/{{.Name}}/update">
+                                    <input type="text" name="service_label" value="{{.Label}}" maxlength="120" aria-label="{{t "Label"}}" required>
+                                    <button type="submit" class="btn-quiet">{{t "Save"}}</button>
+                                </form>
+                            </td>
+                            <td data-label="{{t "Campaigns"}}">{{.Campaigns}}</td>
+                            <td class="actions">
+                                {{if eq .Campaigns 0}}
+                                <form class="form-inline" method="post" action="/campaigns/services/{{.Name}}/delete">
+                                    <button type="submit" class="btn-quiet">{{t "Delete"}}</button>
+                                </form>
+                                {{else}}<span class="hint">{{t "In use"}}</span>{{end}}
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr class="empty-row"><td colspan="4">{{t "No services yet."}}</td></tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            <form method="post" action="/campaigns/services">
+                <div class="field">
+                    <label for="service-name">{{t "Service name"}}</label>
+                    <input type="text" id="service-name" name="service_name" required maxlength="64" pattern="[a-z0-9_\-]+" autocomplete="off" placeholder="trentin">
+                </div>
+                <div class="field">
+                    <label for="service-label">{{t "Label"}}</label>
+                    <input type="text" id="service-label" name="service_label" maxlength="120" autocomplete="off" placeholder="Trentin">
+                </div>
+                <div class="submit-row">
+                    <button type="submit" class="btn-quiet">{{t "Add service"}}</button>
+                </div>
+            </form>
         </section>
     </main>
 </body>

@@ -32,6 +32,9 @@ const (
 	MailStatusSent = "sent"
 	// MailStatusFailed is an address that can be tried again.
 	MailStatusFailed = "failed"
+	// MailStatusUnsubscribed is an address that opted out of the campaign service.
+	// It is left out of later runs and is never counted as sent.
+	MailStatusUnsubscribed = "unsubscribed"
 
 	defaultSMTPPort    = 587
 	maxCampaignName    = 200
@@ -67,9 +70,12 @@ type MailFormat string
 
 // Campaign is a named group of jobs with its own email settings.
 type Campaign struct {
-	ID        string
-	Name      string
-	CreatedAt time.Time
+	ID   string
+	Name string
+	// ServiceName is the sending service checked against the unsubscribe list.
+	// It must be a registered MailService. Stored campaigns default to ServiceTrentin.
+	ServiceName string
+	CreatedAt   time.Time
 }
 
 // Validate reports whether the campaign can be stored.
@@ -85,6 +91,10 @@ func (c Campaign) Validate() error {
 
 	if len(name) > maxCampaignName {
 		return errors.New("campaign name is too long")
+	}
+
+	if c.ServiceName != "" && !ValidServiceName(c.ServiceName) {
+		return ErrInvalidService
 	}
 
 	return nil
@@ -294,6 +304,13 @@ type CampaignStore interface {
 	ListCampaigns(context.Context) ([]CampaignSummary, error)
 	GetCampaign(context.Context, string) (Campaign, error)
 	RenameCampaign(context.Context, string, string) error
+	SetCampaignService(context.Context, string, string) error
+	ListServices(context.Context) ([]MailService, error)
+	GetService(context.Context, string) (MailService, error)
+	CreateService(context.Context, *MailService) error
+	UpdateService(context.Context, *MailService) error
+	// DeleteService returns ErrServiceInUse while a campaign uses the service.
+	DeleteService(context.Context, string) error
 	DeleteCampaign(context.Context, string) error
 	AssignJob(context.Context, string, string) error
 	UnassignJob(context.Context, string, string) error
@@ -301,6 +318,7 @@ type CampaignStore interface {
 	CampaignsForJobs(context.Context, []string) (map[string]CampaignRef, error)
 	GetMail(context.Context, string) (MailConfig, bool, error)
 	SaveMail(context.Context, string, *MailConfig) error
+	// SentEmails returns addresses not to queue again: sent or unsubscribed.
 	SentEmails(context.Context, string) (map[string]struct{}, error)
 	RecordMail(context.Context, string, string, string, string) error
 	MailLog(context.Context, string) ([]MailLogEntry, error)

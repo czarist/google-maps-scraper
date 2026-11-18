@@ -78,7 +78,43 @@ func ensureCampaignSchema(db *sql.DB) error {
 		return err
 	}
 
-	return addMailFormatColumn(db)
+	if err := addMailFormatColumn(db); err != nil {
+		return err
+	}
+
+	return ensureServiceSchema(db)
+}
+
+// ensureServiceSchema adds the sending services and the campaign service column.
+// Campaigns created before services existed become trentin.
+func ensureServiceSchema(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS mail_services (
+			name TEXT PRIMARY KEY,
+			label TEXT NOT NULL,
+			created_at INT NOT NULL
+		)
+	`)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC().Unix()
+
+	for _, svc := range web.DefaultServices {
+		_, err := db.Exec(`INSERT OR IGNORE INTO mail_services (name, label, created_at) VALUES (?, ?, ?)`,
+			svc.Name, svc.Label, now)
+		if err != nil {
+			return err
+		}
+	}
+
+	_, err = db.Exec(`ALTER TABLE campaigns ADD COLUMN servico TEXT NOT NULL DEFAULT '` + web.ServiceTrentin + `'`)
+	if err == nil || strings.Contains(err.Error(), "duplicate column") {
+		return nil
+	}
+
+	return err
 }
 
 // addMailFormatColumn upgrades databases created before HTML bodies existed.
@@ -94,9 +130,9 @@ func addMailFormatColumn(db *sql.DB) error {
 func (repo *repo) CreateCampaign(ctx context.Context, c *web.Campaign) error {
 	created := c.CreatedAt.UTC().Unix()
 	_, err := repo.db.ExecContext(ctx, `
-		INSERT INTO campaigns (id, name, created_at, updated_at)
-		VALUES (?, ?, ?, ?)
-	`, c.ID, strings.TrimSpace(c.Name), created, created)
+		INSERT INTO campaigns (id, name, servico, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)
+	`, c.ID, strings.TrimSpace(c.Name), serviceOrDefault(c.ServiceName), created, created)
 
 	return err
 }
@@ -106,6 +142,7 @@ func (repo *repo) ListCampaigns(ctx context.Context) ([]web.CampaignSummary, err
 		SELECT
 			c.id,
 			c.name,
+			c.servico,
 			c.created_at,
 			(SELECT COUNT(*) FROM campaign_jobs j WHERE j.campaign_id = c.id),
 			CASE
@@ -140,7 +177,7 @@ func (repo *repo) ListCampaigns(ctx context.Context) ([]web.CampaignSummary, err
 			ready   int
 		)
 
-		if err := rows.Scan(&item.ID, &item.Name, &created, &item.JobCount, &ready, &item.LastStatus); err != nil {
+		if err := rows.Scan(&item.ID, &item.Name, &item.ServiceName, &created, &item.JobCount, &ready, &item.LastStatus); err != nil {
 			return nil, err
 		}
 
@@ -163,8 +200,8 @@ func (repo *repo) GetCampaign(ctx context.Context, id string) (web.Campaign, err
 	)
 
 	err := repo.db.QueryRowContext(ctx, `
-		SELECT id, name, created_at FROM campaigns WHERE id = ?
-	`, id).Scan(&c.ID, &c.Name, &created)
+		SELECT id, name, servico, created_at FROM campaigns WHERE id = ?
+	`, id).Scan(&c.ID, &c.Name, &c.ServiceName, &created)
 	if errors.Is(err, sql.ErrNoRows) {
 		return web.Campaign{}, web.ErrNotFound
 	}
@@ -426,8 +463,8 @@ func (repo *repo) SaveMail(ctx context.Context, campaignID string, cfg *web.Mail
 func (repo *repo) SentEmails(ctx context.Context, campaignID string) (map[string]struct{}, error) {
 	rows, err := repo.db.QueryContext(ctx, `
 		SELECT email FROM campaign_mail_log
-		WHERE campaign_id = ? AND status = ?
-	`, campaignID, web.MailStatusSent)
+		WHERE campaign_id = ? AND status IN (?, ?)
+	`, campaignID, web.MailStatusSent, web.MailStatusUnsubscribed)
 	if err != nil {
 		return nil, err
 	}
@@ -645,4 +682,157 @@ func unixTime(sec int64) time.Time {
 	}
 
 	return time.Unix(sec, 0).UTC()
+}
+
+func serviceOrDefault(name string) string {
+	if strings.TrimSpace(name) == "" {
+		return web.ServiceTrentin
+	}
+
+	return name
+}
+
+// SetCampaignService changes the campaign service. Addresses skipped as
+// unsubscribed under the old service become eligible again, because the
+// opt-out applies to one service only.
+func (repo *repo) SetCampaignService(ctx context.Context, id, service string) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var current string
+
+	err = tx.QueryRowContext(ctx, `SELECT servico FROM campaigns WHERE id = ?`, id).Scan(&current)
+	if errors.Is(err, sql.ErrNoRows) {
+		return web.ErrNotFound
+	}
+
+	if err != nil {
+		return err
+	}
+
+	if current == service {
+		return tx.Commit()
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE campaigns SET servico = ?, updated_at = ? WHERE id = ?
+	`, service, time.Now().UTC().Unix(), id); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM campaign_mail_log WHERE campaign_id = ? AND status = ?
+	`, id, web.MailStatusUnsubscribed); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// ListServices returns services with how many campaigns use each.
+func (repo *repo) ListServices(ctx context.Context) ([]web.MailService, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT s.name, s.label,
+			(SELECT COUNT(*) FROM campaigns c WHERE c.servico = s.name)
+		FROM mail_services s
+		ORDER BY s.created_at, s.name
+	`)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var out []web.MailService
+
+	for rows.Next() {
+		var svc web.MailService
+		if err := rows.Scan(&svc.Name, &svc.Label, &svc.Campaigns); err != nil {
+			return nil, err
+		}
+
+		out = append(out, svc)
+	}
+
+	return out, rows.Err()
+}
+
+// GetService loads one service by name.
+func (repo *repo) GetService(ctx context.Context, name string) (web.MailService, error) {
+	var svc web.MailService
+
+	err := repo.db.QueryRowContext(ctx, `
+		SELECT s.name, s.label,
+			(SELECT COUNT(*) FROM campaigns c WHERE c.servico = s.name)
+		FROM mail_services s WHERE s.name = ?
+	`, name).Scan(&svc.Name, &svc.Label, &svc.Campaigns)
+	if errors.Is(err, sql.ErrNoRows) {
+		return web.MailService{}, web.ErrNotFound
+	}
+
+	return svc, err
+}
+
+// CreateService stores a new service.
+func (repo *repo) CreateService(ctx context.Context, svc *web.MailService) error {
+	_, err := repo.db.ExecContext(ctx, `
+		INSERT INTO mail_services (name, label, created_at) VALUES (?, ?, ?)
+	`, svc.Name, svc.Label, time.Now().UTC().Unix())
+	if err != nil && strings.Contains(err.Error(), "UNIQUE") {
+		return web.ErrServiceExists
+	}
+
+	return err
+}
+
+// UpdateService changes the label of a service.
+func (repo *repo) UpdateService(ctx context.Context, svc *web.MailService) error {
+	res, err := repo.db.ExecContext(ctx, `
+		UPDATE mail_services SET label = ? WHERE name = ?
+	`, svc.Label, svc.Name)
+	if err != nil {
+		return err
+	}
+
+	return rowsAffected(res, web.ErrNotFound)
+}
+
+// DeleteService removes a service no campaign uses.
+func (repo *repo) DeleteService(ctx context.Context, name string) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	var used int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM campaigns WHERE servico = ?`, name).Scan(&used); err != nil {
+		return err
+	}
+
+	if used > 0 {
+		return web.ErrServiceInUse
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM mail_services WHERE name = ?`, name)
+	if err != nil {
+		return err
+	}
+
+	if err := rowsAffected(res, web.ErrNotFound); err != nil {
+		return err
+	}
+
+	return tx.Commit()
 }

@@ -19,12 +19,14 @@ const (
 
 type campaignsView struct {
 	Campaigns []CampaignSummary
+	Services  []MailService
 	Notice    string
 	Error     string
 }
 
 type campaignView struct {
 	Campaign       Campaign
+	Services       []MailService
 	Mail           MailConfig
 	PasswordSet    bool
 	Jobs           []Job
@@ -58,8 +60,16 @@ func (s *Server) renderCampaigns(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	services, err := s.svc.ListServices(r.Context())
+	if err != nil {
+		http.Error(w, publicErr(err), http.StatusInternalServerError)
+
+		return
+	}
+
 	s.renderTemplate(w, r, tmplCampaigns, campaignsView{
 		Campaigns: items,
+		Services:  services,
 		Notice:    queryMessage(r, "notice"),
 		Error:     queryMessage(r, "error"),
 	})
@@ -73,8 +83,9 @@ func (s *Server) createCampaign(w http.ResponseWriter, r *http.Request) {
 	}
 
 	campaign := Campaign{
-		ID:   uuid.NewV4().String(),
-		Name: r.Form.Get("name"),
+		ID:          uuid.NewV4().String(),
+		Name:        r.Form.Get("name"),
+		ServiceName: r.Form.Get("servico"),
 	}
 	if err := s.svc.CreateCampaign(r.Context(), &campaign); err != nil {
 		redirectQuery(w, r, "/campaigns", "error", publicErr(err))
@@ -119,6 +130,11 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 	var view campaignView
 
 	campaign, err := s.svc.GetCampaign(r.Context(), id)
+	if err != nil {
+		return view, err
+	}
+
+	view.Services, err = s.svc.ListServices(r.Context())
 	if err != nil {
 		return view, err
 	}
@@ -205,8 +221,16 @@ func (s *Server) campaignRename(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		return s.svc.RenameCampaign(r.Context(), id, r.Form.Get("name"))
-	}, "Campaign renamed")
+		if err := s.svc.RenameCampaign(r.Context(), id, r.Form.Get("name")); err != nil {
+			return err
+		}
+
+		if service := r.Form.Get("servico"); service != "" {
+			return s.svc.SetCampaignService(r.Context(), id, service)
+		}
+
+		return nil
+	}, "Campaign saved")
 }
 
 func (s *Server) campaignDelete(w http.ResponseWriter, r *http.Request) {
@@ -502,6 +526,16 @@ func publicErr(err error) string {
 		return "Job not found"
 	case errors.Is(err, ErrDispatchRunning):
 		return "A dispatch is already running for this campaign"
+	case errors.Is(err, ErrInvalidService):
+		return "The campaign service is missing or not registered"
+	case errors.Is(err, ErrServiceInUse):
+		return "This service is used by a campaign. Move those campaigns to another service first"
+	case errors.Is(err, ErrServiceExists):
+		return "This service already exists"
+	case errors.Is(err, ErrOptOutUnavailable):
+		return "Could not check the unsubscribe list. Nothing was sent. Try again later"
+	case errors.As(err, new(ErrUnsubscribed)):
+		return "This address unsubscribed from the campaign service. Nothing was sent"
 	case errors.Is(err, ErrMailNotReady):
 		return "Fill in the SMTP host, from address, password, subject, and body before sending"
 	default:

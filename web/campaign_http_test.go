@@ -168,6 +168,8 @@ type memStore struct {
 	jobCamp    map[string]string
 	mail       map[string]MailConfig
 	sent       map[string]map[string]string
+	reasons    map[string]map[string]string
+	services   map[string]MailService
 	dispatches []Dispatch
 }
 
@@ -178,7 +180,98 @@ func newMemStore() *memStore {
 		jobCamp:   map[string]string{},
 		mail:      map[string]MailConfig{},
 		sent:      map[string]map[string]string{},
+		reasons:   map[string]map[string]string{},
+		services:  defaultServiceMap(),
 	}
+}
+
+func defaultServiceMap() map[string]MailService {
+	out := map[string]MailService{}
+	for _, svc := range DefaultServices {
+		out[svc.Name] = svc
+	}
+
+	return out
+}
+
+func (m *memStore) SetCampaignService(_ context.Context, id, service string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	c, ok := m.campaigns[id]
+	if !ok {
+		return ErrNotFound
+	}
+
+	c.ServiceName = service
+	m.campaigns[id] = c
+
+	return nil
+}
+
+func (m *memStore) ListServices(context.Context) ([]MailService, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	out := make([]MailService, 0, len(m.services))
+	for _, svc := range m.services {
+		out = append(out, svc)
+	}
+
+	return out, nil
+}
+
+func (m *memStore) GetService(_ context.Context, name string) (MailService, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	svc, ok := m.services[name]
+	if !ok {
+		return MailService{}, ErrNotFound
+	}
+
+	return svc, nil
+}
+
+func (m *memStore) CreateService(_ context.Context, svc *MailService) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.services[svc.Name]; ok {
+		return ErrServiceExists
+	}
+
+	m.services[svc.Name] = *svc
+
+	return nil
+}
+
+func (m *memStore) UpdateService(_ context.Context, svc *MailService) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.services[svc.Name]; !ok {
+		return ErrNotFound
+	}
+
+	m.services[svc.Name] = *svc
+
+	return nil
+}
+
+func (m *memStore) DeleteService(_ context.Context, name string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	for _, c := range m.campaigns {
+		if c.ServiceName == name {
+			return ErrServiceInUse
+		}
+	}
+
+	delete(m.services, name)
+
+	return nil
 }
 
 func (m *memStore) CreateCampaign(_ context.Context, c *Campaign) error {
@@ -325,7 +418,7 @@ func (m *memStore) SentEmails(_ context.Context, campaignID string) (map[string]
 	out := map[string]struct{}{}
 
 	for email, status := range m.sent[campaignID] {
-		if status == MailStatusSent {
+		if status == MailStatusSent || status == MailStatusUnsubscribed {
 			out[email] = struct{}{}
 		}
 	}
@@ -333,15 +426,17 @@ func (m *memStore) SentEmails(_ context.Context, campaignID string) (map[string]
 	return out, nil
 }
 
-func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, _ string) error {
+func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, reason string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
 	if m.sent[campaignID] == nil {
 		m.sent[campaignID] = map[string]string{}
+		m.reasons[campaignID] = map[string]string{}
 	}
 
 	m.sent[campaignID][email] = status
+	m.reasons[campaignID][email] = reason
 
 	return nil
 }

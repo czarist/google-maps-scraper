@@ -71,12 +71,12 @@ func TestRenderMailRejectsUnknownField(t *testing.T) {
 }
 
 func TestBuildMessageUsesHTMLContentType(t *testing.T) {
-	html := buildMessage("Cafe", "from@cafe.test", "to@cafe.test", "Hello", "<p>Hi</p>", MailFormatHTML)
+	html := buildMessage("Cafe", "from@cafe.test", "to@cafe.test", &OutgoingMail{Subject: "Hello", Body: "<p>Hi</p>"}, MailFormatHTML)
 	if !strings.Contains(html, "Content-Type: text/html") || !strings.Contains(html, "<p>Hi</p>") {
 		t.Fatalf("html message: %s", html)
 	}
 
-	plain := buildMessage("Cafe", "from@cafe.test", "to@cafe.test", "Hello", "Hi", MailFormatPlain)
+	plain := buildMessage("Cafe", "from@cafe.test", "to@cafe.test", &OutgoingMail{Subject: "Hello", Body: "Hi"}, MailFormatPlain)
 	if !strings.Contains(plain, "Content-Type: text/plain") {
 		t.Fatalf("plain message: %s", plain)
 	}
@@ -138,7 +138,7 @@ func TestSendSMTPWritesPlainText(t *testing.T) {
 
 	cfg.Port = mustPort(t, port)
 
-	err = SendSMTP(t.Context(), &cfg, "to@cafe.test", "Hello", "Body line")
+	err = SendSMTP(t.Context(), &cfg, &OutgoingMail{To: "to@cafe.test", Subject: "Hello", Body: "Body line"})
 	if err != nil {
 		t.Fatalf("SendSMTP: %v", err)
 	}

@@ -44,6 +44,16 @@ func (s *Service) CreateCampaign(ctx context.Context, c *Campaign) error {
 	}
 
 	c.Name = strings.TrimSpace(c.Name)
+
+	c.ServiceName = strings.TrimSpace(c.ServiceName)
+	if c.ServiceName == "" {
+		c.ServiceName = ServiceTrentin
+	}
+
+	if err := requireService(ctx, store, c.ServiceName); err != nil {
+		return err
+	}
+
 	if c.CreatedAt.IsZero() {
 		c.CreatedAt = time.Now().UTC()
 	}
@@ -78,6 +88,52 @@ func (s *Service) RenameCampaign(ctx context.Context, id, name string) error {
 	}
 
 	return store.RenameCampaign(ctx, id, c.Name)
+}
+
+// SetCampaignService changes the service a campaign sends as.
+func (s *Service) SetCampaignService(ctx context.Context, id, service string) error {
+	store, err := s.campaignStore()
+	if err != nil {
+		return err
+	}
+
+	service = strings.TrimSpace(service)
+	if err := requireService(ctx, store, service); err != nil {
+		return err
+	}
+
+	return store.SetCampaignService(ctx, id, service)
+}
+
+// requireService returns ErrInvalidService unless name is a registered service.
+func requireService(ctx context.Context, store CampaignStore, name string) error {
+	if !ValidServiceName(name) {
+		return ErrInvalidService
+	}
+
+	if _, err := store.GetService(ctx, name); err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return ErrInvalidService
+		}
+
+		return err
+	}
+
+	return nil
+}
+
+// campaignService returns the validated service of a stored campaign.
+func campaignService(ctx context.Context, store CampaignStore, id string) (string, error) {
+	c, err := store.GetCampaign(ctx, id)
+	if err != nil {
+		return "", err
+	}
+
+	if err := requireService(ctx, store, c.ServiceName); err != nil {
+		return "", err
+	}
+
+	return c.ServiceName, nil
 }
 
 // DeleteCampaign removes the campaign, its email settings, and its send history.
@@ -209,6 +265,11 @@ func (s *Service) SendTestMail(ctx context.Context, id string, cfg *MailConfig, 
 		return err
 	}
 
+	service, err := campaignService(ctx, store, id)
+	if err != nil {
+		return err
+	}
+
 	merged, err := s.mergePassword(ctx, store, id, cfg)
 	if err != nil {
 		return err
@@ -232,7 +293,7 @@ func (s *Service) SendTestMail(ctx context.Context, id string, cfg *MailConfig, 
 		send = SendSMTP
 	}
 
-	return send(ctx, &merged, toAddr, subject, body)
+	return s.deliver(ctx, &merged, service, &OutgoingMail{To: toAddr, Subject: subject, Body: body}, send)
 }
 
 // CheckCampaignMail dials the posted SMTP server and does not save or send.
@@ -401,6 +462,12 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 		return DispatchResult{}, ErrDispatchRunning
 	}
 
+	// An invalid service stops the run before anything is queued.
+	service, err := campaignService(ctx, store, campaignID)
+	if err != nil {
+		return DispatchResult{}, err
+	}
+
 	cfg, err := s.mailReady(ctx, store, campaignID)
 	if err != nil {
 		return DispatchResult{}, err
@@ -452,7 +519,7 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 
 	started = true
 
-	go s.runDispatch(campaignID, dispatchID, &cfg, msgs, skipped, missing, renderFailed, send) //nolint:gosec // G118: dispatch continues after the HTTP handler returns.
+	go s.runDispatch(campaignID, dispatchID, service, &cfg, msgs, skipped, missing, renderFailed, send) //nolint:gosec // G118: dispatch continues after the HTTP handler returns.
 
 	return DispatchResult{Started: true, Detail: "Dispatch started."}, nil
 }
@@ -514,7 +581,7 @@ func (s *Service) finishNow(ctx context.Context, store CampaignStore, campaignID
 func emptyDispatchDetail(skipped, missing, failed int) string {
 	switch {
 	case skipped > 0:
-		return fmt.Sprintf("No new email addresses. Skipped %d already sent.", skipped)
+		return fmt.Sprintf("No new email addresses. Skipped %d already sent or unsubscribed.", skipped)
 	case missing > 0:
 		return fmt.Sprintf("No email addresses to send. %d jobs had no results file.", missing)
 	case failed > 0:
@@ -605,7 +672,7 @@ func (s *Service) unlockDispatch(id string) {
 	delete(s.dispatching, id)
 }
 
-func (s *Service) runDispatch(campaignID, dispatchID string, cfg *MailConfig, msgs []renderedMail, skipped, missing, renderFailed int, send MailSender) {
+func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailConfig, msgs []renderedMail, skipped, missing, renderFailed int, send MailSender) {
 	defer s.unlockDispatch(campaignID)
 
 	ctx := context.Background()
@@ -617,11 +684,35 @@ func (s *Service) runDispatch(campaignID, dispatchID string, cfg *MailConfig, ms
 
 	sent := 0
 	failed := renderFailed
+	unsubscribed := 0
 	firstErr := ""
+
+	var halt error
 
 	for i := range msgs {
 		msg := &msgs[i]
-		sendErr := send(ctx, cfg, msg.To, msg.Subject, msg.Body)
+		sendErr := s.deliver(ctx, cfg, service, &OutgoingMail{To: msg.To, Subject: msg.Subject, Body: msg.Body}, send)
+
+		var optedOut ErrUnsubscribed
+
+		if errors.As(sendErr, &optedOut) {
+			// Not sent and not marked sent. The status keeps it out of later runs.
+			unsubscribed++
+
+			s.recordMail(ctx, store, campaignID, msg.To, MailStatusUnsubscribed, optedOut.Error())
+
+			continue
+		}
+
+		if suspendsSend(sendErr) {
+			// Nothing is recorded, so this address and the rest stay queued for the next run.
+			// The next lookups would most likely fail too, so the run stops here.
+			halt = sendErr
+			log.Printf("dispatch %s stopped: %v", dispatchID, sendErr)
+
+			break
+		}
+
 		status := MailStatusSent
 		errMsg := ""
 
@@ -637,16 +728,14 @@ func (s *Service) runDispatch(campaignID, dispatchID string, cfg *MailConfig, ms
 			sent++
 		}
 
-		if err := store.RecordMail(ctx, campaignID, strings.ToLower(msg.To), status, errMsg); err != nil {
-			log.Printf("record mail result for campaign %s: %v", campaignID, err) //nolint:gosec // G706: campaignID is a parsed UUID. The error is the local write failure.
-		}
+		s.recordMail(ctx, store, campaignID, msg.To, status, errMsg)
 
 		if i == len(msgs)-1 {
 			continue
 		}
 
-		wait, detail := s.nextPause(i, sent, failed, skipped)
-		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped, detail); err != nil {
+		wait, detail := s.nextPause(i, sent, failed, skipped+unsubscribed)
+		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped+unsubscribed, detail); err != nil {
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
 
@@ -654,13 +743,21 @@ func (s *Service) runDispatch(campaignID, dispatchID string, cfg *MailConfig, ms
 	}
 
 	status := DispatchOK
-	if sent == 0 && failed > 0 {
+	if halt != nil || (sent == 0 && failed > 0) {
 		status = DispatchFailed
 	}
 
-	detail := fmt.Sprintf("Sent %d, failed %d, skipped %d.", sent, failed, skipped)
+	detail := fmt.Sprintf("Sent %d, failed %d, skipped %d.", sent, failed, skipped+unsubscribed)
+	if unsubscribed > 0 {
+		detail += fmt.Sprintf(" %d unsubscribed from %s.", unsubscribed, service)
+	}
+
 	if missing > 0 {
 		detail += fmt.Sprintf(" %d jobs had no results file.", missing)
+	}
+
+	if halt != nil {
+		detail = "Stopped: " + halt.Error() + ". The remaining addresses stay queued. " + detail
 	}
 
 	if firstErr != "" {
@@ -673,11 +770,22 @@ func (s *Service) runDispatch(campaignID, dispatchID string, cfg *MailConfig, ms
 		FinishedAt: time.Now().UTC(),
 		Sent:       sent,
 		Failed:     failed,
-		Skipped:    skipped,
+		Skipped:    skipped + unsubscribed,
 		Detail:     trimDetail(detail),
 	})
 	if err != nil {
 		log.Printf("update dispatch %s: %v", dispatchID, err)
+	}
+}
+
+// suspendsSend reports errors that stop a send without trying the provider.
+func suspendsSend(err error) bool {
+	return errors.Is(err, ErrOptOutUnavailable) || errors.Is(err, ErrInvalidService) || errors.Is(err, errUnsubscribeLink)
+}
+
+func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignID, email, status, errMsg string) {
+	if err := store.RecordMail(ctx, campaignID, strings.ToLower(email), status, errMsg); err != nil {
+		log.Printf("record mail result for campaign %s: %v", campaignID, err) //nolint:gosec // G706: campaignID is a parsed UUID. The error is the local write failure.
 	}
 }
 

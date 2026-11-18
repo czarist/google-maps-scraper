@@ -166,8 +166,15 @@
                     <label for="rename">{{t "Campaign name"}}</label>
                     <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
                 </div>
+                <div class="field">
+                    <label for="campaign-service">{{t "Service"}}</label>
+                    <select id="campaign-service" name="servico" required>
+                        {{range .Services}}<option value="{{.Name}}"{{if eq .Name $.Campaign.ServiceName}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
+                    </select>
+                    <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
+                </div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-quiet">{{t "Rename"}}</button>
+                    <button type="submit" class="btn-quiet">{{t "Save"}}</button>
                 </div>
             </form>
 

@@ -51,9 +51,15 @@ services:
             - "**/*.md"
             - .claude/
             - .mcp.json
+            - .env
     depends_on:
       mysql:
         condition: service_healthy
+    # MYSQL_BANCO_NAO_PERTURBE_* and UNSUBSCRIBE_BASE_URL come from .env (see .env.example).
+    # Without the unsubscribe database every email send is refused.
+    env_file:
+      - path: .env
+        required: false
     environment:
       MYSQL_DSN: "gmaps:gmaps@tcp(mysql:3306)/gmaps?parseTime=true&charset=utf8mb4"
     command: ["-data-folder", "/gmapsdata"]

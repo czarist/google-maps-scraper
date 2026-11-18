@@ -17,6 +17,7 @@ import (
 	"github.com/gosom/google-maps-scraper/deduper"
 	"github.com/gosom/google-maps-scraper/exiter"
 	"github.com/gosom/google-maps-scraper/mysqlstore"
+	"github.com/gosom/google-maps-scraper/optout"
 	"github.com/gosom/google-maps-scraper/runner"
 	"github.com/gosom/google-maps-scraper/tlmt"
 	"github.com/gosom/google-maps-scraper/web"
@@ -32,6 +33,7 @@ type webrunner struct {
 	svc       *web.Service
 	cfg       *runner.Config
 	mysqlDB   *sql.DB
+	optOut    *optout.Checker
 	setupMate func(context.Context, io.Writer, *web.Job) (mateRunner, error)
 }
 
@@ -60,6 +62,11 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 
 	svc := web.NewService(repo, cfg.DataFolder)
 
+	optOut, err := openOptOut(svc)
+	if err != nil {
+		return nil, err
+	}
+
 	srv, err := web.New(svc, cfg.Addr)
 	if err != nil {
 		return nil, err
@@ -81,6 +88,7 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 		svc:       svc,
 		cfg:       cfg,
 		mysqlDB:   mysqlDB,
+		optOut:    optOut,
 		setupMate: defaultSetupMate(cfg, mysqlDB, svc),
 	}
 
@@ -102,11 +110,46 @@ func (w *webrunner) Run(ctx context.Context) error {
 }
 
 func (w *webrunner) Close(context.Context) error {
+	if w.optOut != nil {
+		_ = w.optOut.Close()
+	}
+
 	if w.mysqlDB != nil {
 		return w.mysqlDB.Close()
 	}
 
 	return nil
+}
+
+// openOptOut connects the unsubscribe database. Without it every email send is
+// refused, so a missing configuration is logged but does not stop the web UI.
+func openOptOut(svc *web.Service) (*optout.Checker, error) {
+	base := optout.UnsubscribeBaseFromEnv()
+	if _, err := web.UnsubscribeURL(base, web.ServiceTrentin); err != nil {
+		return nil, fmt.Errorf("%s: %w", optout.EnvUnsubscribeBase, err)
+	}
+
+	cfg, ok := optout.ConfigFromEnv()
+	if !ok {
+		log.Printf("unsubscribe database is not configured (%s, %s, %s): email sending is disabled",
+			optout.EnvHost, optout.EnvUser, optout.EnvDatabase)
+		svc.SetOptOut(nil, base)
+
+		return nil, nil //nolint:nilnil // no unsubscribe database is a valid setup: sends are refused
+	}
+
+	checker, err := optout.Open(&cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := checker.Ping(context.Background()); err != nil {
+		log.Printf("unsubscribe database is not reachable yet, sends will wait for it: %v", err)
+	}
+
+	svc.SetOptOut(checker, base)
+
+	return checker, nil
 }
 
 func (w *webrunner) work(ctx context.Context) error {

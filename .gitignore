@@ -10,3 +10,4 @@ gmapsdata/
 
 scripts/watch.log
 tmp_e2e/
+.env

@@ -21,7 +21,7 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 		StartedAt:  time.Now().UTC(),
 	}}
 
-	svc := &Service{repo: store}
+	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
 
 	var details []string
 
@@ -41,7 +41,9 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 
 	var got []string
 
-	send := func(_ context.Context, _ *MailConfig, to, _, _ string) error {
+	send := func(_ context.Context, _ *MailConfig, msg *OutgoingMail) error {
+		to := msg.To
+
 		got = append(got, to)
 		if to == "user02@example.com" {
 			return errors.New("smtp down")
@@ -50,7 +52,7 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 		return nil
 	}
 
-	svc.runDispatch("camp", "disp", &MailConfig{}, msgs, 3, 1, 0, send)
+	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, msgs, 3, 1, 0, send)
 
 	if len(got) != n {
 		t.Fatalf("sent calls %d, want %d", len(got), n)

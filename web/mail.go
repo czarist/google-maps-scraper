@@ -57,8 +57,15 @@ func (r *Recipient) Vars() MailVars {
 	}
 }
 
-// MailSender delivers one plain-text message.
-type MailSender func(ctx context.Context, cfg *MailConfig, to, subject, body string) error
+// MailSender delivers one message. Only Service.deliver calls it, after the
+// unsubscribe check, so every send path goes through that check.
+type MailSender func(ctx context.Context, cfg *MailConfig, msg *OutgoingMail) error
+
+// mailTemplateFuncs lets {{UNSUBSCRIBE_URL}} pass through rendering unchanged.
+// Service.deliver replaces it with the campaign unsubscribe link.
+var mailTemplateFuncs = template.FuncMap{
+	"UNSUBSCRIBE_URL": func() string { return unsubscribeMarker },
+}
 
 type renderedMail struct {
 	To      string
@@ -67,12 +74,12 @@ type renderedMail struct {
 }
 
 func parseMailTemplates(subject, body string) (subjectT, bodyT *template.Template, err error) {
-	subjectT, err = template.New("subject").Option("missingkey=error").Parse(subject) //nolint:gosec // G708: the campaign owner writes this template. Execution only receives MailVars.
+	subjectT, err = template.New("subject").Funcs(mailTemplateFuncs).Option("missingkey=error").Parse(subject) //nolint:gosec // G708: the campaign owner writes this template. Execution only receives MailVars.
 	if err != nil {
 		return nil, nil, err
 	}
 
-	bodyT, err = template.New("body").Option("missingkey=error").Parse(body) //nolint:gosec // G708: the campaign owner writes this template. Execution only receives MailVars.
+	bodyT, err = template.New("body").Funcs(mailTemplateFuncs).Option("missingkey=error").Parse(body) //nolint:gosec // G708: the campaign owner writes this template. Execution only receives MailVars.
 	if err != nil {
 		return nil, nil, err
 	}
@@ -248,7 +255,7 @@ func splitEmailCell(raw string) []string {
 }
 
 // SendSMTP delivers one message with the campaign SMTP settings.
-func SendSMTP(ctx context.Context, cfg *MailConfig, to, subject, body string) error {
+func SendSMTP(ctx context.Context, cfg *MailConfig, out *OutgoingMail) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -261,12 +268,12 @@ func SendSMTP(ctx context.Context, cfg *MailConfig, to, subject, body string) er
 		return err
 	}
 
-	toAddr, err := addressOnly(to)
+	toAddr, err := addressOnly(out.To)
 	if err != nil {
 		return err
 	}
 
-	msg := buildMessage(cfg.FromName, from, toAddr, subject, body, cfg.Format)
+	msg := buildMessage(cfg.FromName, from, toAddr, out, cfg.Format)
 
 	return deliverSMTP(ctx, cfg, from, toAddr, msg)
 }
@@ -293,7 +300,7 @@ func CheckSMTP(ctx context.Context, cfg *MailConfig) error {
 	return client.Quit()
 }
 
-func buildMessage(fromName, from, to, subject, body string, format MailFormat) string {
+func buildMessage(fromName, from, to string, out *OutgoingMail, format MailFormat) string {
 	fromHeader := (&mail.Address{Name: fromName, Address: from}).String()
 	toHeader := (&mail.Address{Address: to}).String()
 	media := "text/plain"
@@ -305,14 +312,29 @@ func buildMessage(fromName, from, to, subject, body string, format MailFormat) s
 	var b strings.Builder
 	b.WriteString("From: " + fromHeader + "\r\n")
 	b.WriteString("To: " + toHeader + "\r\n")
-	b.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", subject) + "\r\n")
+	b.WriteString("Subject: " + mime.QEncoding.Encode("utf-8", out.Subject) + "\r\n")
+
+	if link := headerSafe(out.ListUnsubscribe); link != "" {
+		// No List-Unsubscribe-Post: the page asks for confirmation, so one click does not unsubscribe.
+		b.WriteString("List-Unsubscribe: <" + link + ">\r\n")
+	}
+
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: " + media + "; charset=UTF-8\r\n")
 	b.WriteString("Content-Transfer-Encoding: 8bit\r\n")
 	b.WriteString("\r\n")
-	b.WriteString(normalizeNewlines(body))
+	b.WriteString(normalizeNewlines(out.Body))
 
 	return b.String()
+}
+
+// headerSafe drops a value that could break out of its header line.
+func headerSafe(v string) string {
+	if strings.ContainsAny(v, "\r\n<>") {
+		return ""
+	}
+
+	return strings.TrimSpace(v)
 }
 
 func normalizeNewlines(body string) string {

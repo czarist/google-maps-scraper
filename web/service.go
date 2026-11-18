@@ -24,6 +24,11 @@ type Service struct {
 	// dispatchSleep and dispatchWait replace the paced-send clock in tests.
 	dispatchSleep func(context.Context, time.Duration)
 	dispatchWait  func(lo, hi time.Duration) time.Duration
+
+	// optOut answers unsubscribe lookups. When nil, every send is refused.
+	optOut OptOutChecker
+	// unsubscribeBase is the page linked from every message.
+	unsubscribeBase string
 }
 
 // StartProgress starts a live place counter for a job.

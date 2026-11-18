@@ -102,6 +102,7 @@ func TestDispatchSkipsSentAddresses(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	svc := web.NewService(repo, dir)
+	svc.SetOptOut(allowAll{}, "https://example.test/descadastro")
 
 	if err := repo.CreateCampaign(ctx, &web.Campaign{ID: "camp", Name: "Camp", CreatedAt: time.Now()}); err != nil {
 		t.Fatalf("create: %v", err)
@@ -134,8 +135,8 @@ func TestDispatchSkipsSentAddresses(t *testing.T) {
 
 	var sent []string
 
-	sender := func(_ context.Context, _ *web.MailConfig, to, subject, body string) error {
-		sent = append(sent, to+"|"+subject+"|"+body)
+	sender := func(_ context.Context, _ *web.MailConfig, msg *web.OutgoingMail) error {
+		sent = append(sent, msg.To+"|"+msg.Subject+"|"+msg.Body)
 
 		return nil
 	}
@@ -214,3 +215,10 @@ func waitDispatch(t *testing.T, repo *repo, campaignID string) {
 
 	t.Fatal("dispatch did not finish")
 }
+
+// allowAll is an unsubscribe list where nobody opted out.
+type allowAll struct{}
+
+func (allowAll) OptedOut(context.Context, string, string) (bool, error) { return false, nil }
+
+func (allowAll) ServiceExists(context.Context, string) (bool, error) { return true, nil }
