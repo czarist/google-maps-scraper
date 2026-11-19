@@ -46,11 +46,12 @@ const (
 	// mailBatchSize is how many messages go out before the longer pause.
 	mailBatchSize = 10
 	// intraBatchMinWait and intraBatchMaxWait are the pause between messages in one batch.
-	intraBatchMinWait = 20 * time.Second
-	intraBatchMaxWait = 75 * time.Second
-	// batchGapMinWait and batchGapMaxWait are the pause between batches.
-	batchGapMinWait = 120 * time.Second
-	batchGapMaxWait = 300 * time.Second
+	// 9 pauses averaging 20s spread a batch of 10 over about 3 minutes.
+	intraBatchMinWait = 12 * time.Second
+	intraBatchMaxWait = 28 * time.Second
+	// batchGapMinWait and batchGapMaxWait are the pause between batches (about one minute).
+	batchGapMinWait = 60 * time.Second
+	batchGapMaxWait = 75 * time.Second
 )
 
 // ErrDispatchRunning is returned when a campaign already has a send in progress.

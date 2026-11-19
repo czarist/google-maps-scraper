@@ -217,6 +217,19 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		return w.finishJob(ctx, job, web.StatusFailed, nil)
 	}
 
+	// Never reach Google without a working proxy when proxies are required,
+	// and never with proxies that are dead (expired plan).
+	proxies := job.Data.Proxies
+	if len(w.cfg.Proxies) > 0 {
+		proxies = w.cfg.Proxies
+	}
+
+	if err := w.svc.CheckJobProxies(ctx, proxies); err != nil {
+		log.Printf("job %s not started: %v", job.ID, err)
+
+		return w.finishJob(ctx, job, web.StatusFailed, err)
+	}
+
 	outpath := filepath.Join(w.cfg.DataFolder, job.ID+".csv")
 
 	outfile, err := os.Create(outpath)

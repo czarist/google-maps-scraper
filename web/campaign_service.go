@@ -147,6 +147,25 @@ func (s *Service) DeleteCampaign(ctx context.Context, id string) error {
 	return store.DeleteCampaign(ctx, id)
 }
 
+// DeleteCampaignWithJobs deletes a campaign and every job in it, with their CSV files.
+func (s *Service) DeleteCampaignWithJobs(ctx context.Context, id string) (int, error) {
+	jobs, err := s.CampaignJobList(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+
+	ids := make([]string, len(jobs))
+	for i := range jobs {
+		ids[i] = jobs[i].ID
+	}
+
+	if err := s.DeleteMany(ctx, ids); err != nil {
+		return 0, err
+	}
+
+	return len(ids), s.DeleteCampaign(ctx, id)
+}
+
 // AssignJob moves a job into a campaign.
 func (s *Service) AssignJob(ctx context.Context, campaignID, jobID string) error {
 	store, err := s.campaignStore()

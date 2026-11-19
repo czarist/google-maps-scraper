@@ -73,6 +73,7 @@ func New(svc *Service, addr string) (*Server, error) {
 		ans.delete(w, r)
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
+	mux.HandleFunc("/jobs/delete", ans.deleteMany)
 	mux.HandleFunc("/campaigns", ans.campaigns)
 	mux.HandleFunc("/campaigns/{id}", ans.campaign)
 	mux.HandleFunc("/campaigns/services", ans.serviceCreate)
@@ -92,6 +93,7 @@ func New(svc *Service, addr string) (*Server, error) {
 
 		ans.viewJob(w, r)
 	})
+	mux.HandleFunc("/proxyscrape/status", ans.proxyScrapeStatus)
 	mux.HandleFunc("/", ans.index)
 	mux.Handle("/mcp", ans.mcpHandler())
 
@@ -200,19 +202,21 @@ func (s *Server) Start(ctx context.Context) error {
 }
 
 type formData struct {
-	Name      string
-	MaxTime   string
-	Keywords  []string
-	Language  string
-	Zoom      int
-	FastMode  bool
-	Radius    int
-	Lat       string
-	Lon       string
-	Depth     int
-	Email     bool
-	Proxies   []string
-	Campaigns []CampaignSummary
+	Name     string
+	MaxTime  string
+	Keywords []string
+	Language string
+	Zoom     int
+	FastMode bool
+	Radius   int
+	Lat      string
+	Lon      string
+	Depth    int
+	Email    bool
+	Proxies  []string
+	// ProxyScrape is true when PROXYSCRAPE_API_KEY is set.
+	ProxyScrape bool
+	Campaigns   []CampaignSummary
 }
 
 type ctxKey string
@@ -243,6 +247,15 @@ func getIDFromRequest(r *http.Request) (uuid.UUID, bool) {
 func (f formData) ProxiesString() string {
 	return strings.Join(f.Proxies, "\n")
 }
+
+// RepeatUFs lists the states for "repeat in every municipality of a state".
+func (f formData) RepeatUFs() []UFCount { return MunicipalityUFs() }
+
+// CapitalCount is how many jobs "repeat in every capital" creates.
+func (f formData) CapitalCount() int { return CapitalCount() }
+
+// MunicipalityCount is how many jobs "repeat in every municipality" creates.
+func (f formData) MunicipalityCount() int { return MunicipalityCount() }
 
 //nolint:gocritic // this is used in template
 func (f formData) KeywordsString() string {
@@ -282,6 +295,8 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	} else {
 		data.Proxies = saved
 	}
+
+	data.ProxyScrape = s.svc.proxyScrape != nil
 
 	if err := s.execTemplate(w, r, "static/templates/index.html", data); err != nil {
 		log.Printf("render index: %v", err)
@@ -391,16 +406,26 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 
 	newJob.Data.Email = r.Form.Get("email") == formChecked
 
-	proxies := strings.Split(r.Form.Get("proxies"), "\n")
-	if len(proxies) > 0 {
-		for _, p := range proxies {
-			p = strings.TrimSpace(p)
-			if p == "" {
-				continue
-			}
+	if s.svc.proxyScrape != nil && r.Form.Get("proxy_manual") != formChecked {
+		// Default: proxies from the ProxyScrape account.
+		newJob.Data.Proxies, err = s.svc.DefaultProxies(r.Context())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 
-			newJob.Data.Proxies = append(newJob.Data.Proxies, p)
+			return
 		}
+	} else {
+		for _, p := range strings.Split(r.Form.Get("proxies"), "\n") {
+			if p = strings.TrimSpace(p); p != "" {
+				newJob.Data.Proxies = append(newJob.Data.Proxies, p)
+			}
+		}
+	}
+
+	if len(newJob.Data.Proxies) == 0 && s.svc.RequiresProxies() {
+		http.Error(w, ErrNoProxies.Error(), http.StatusUnprocessableEntity)
+
+		return
 	}
 
 	err = newJob.Validate()
@@ -410,22 +435,45 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = s.svc.Create(r.Context(), &newJob)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+	jobs := []Job{newJob}
 
-		return
-	}
+	// "Repeat in other cities": one job per city, same settings.
+	if mode := r.Form.Get("repeat_cities"); mode != RepeatNone {
+		cities, err := RepeatCities(mode, r.Form.Get("repeat_uf"))
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 
-	if campaignID != "" {
-		if err := s.svc.AssignJob(r.Context(), campaignID, newJob.ID); err != nil {
-			http.Error(w, publicErr(err), http.StatusInternalServerError)
+			return
+		}
+
+		jobs, err = ExpandJobByCities(&newJob, cities, func() string { return uuid.NewV4().String() })
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 
 			return
 		}
 	}
 
-	if err := s.renderJobGroups(r, w, newJob.ID); err != nil {
+	for i := range jobs {
+		// Distinct timestamps keep the cities in list order in the queue.
+		jobs[i].Date = newJob.Date.Add(time.Duration(i) * time.Millisecond)
+
+		if err := s.svc.Create(r.Context(), &jobs[i]); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+
+			return
+		}
+
+		if campaignID != "" {
+			if err := s.svc.AssignJob(r.Context(), campaignID, jobs[i].ID); err != nil {
+				http.Error(w, publicErr(err), http.StatusInternalServerError)
+
+				return
+			}
+		}
+	}
+
+	if err := s.renderJobGroups(r, w, jobs[0].ID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
@@ -518,6 +566,53 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 
 	err := s.svc.Delete(r.Context(), deleteID.String())
 	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	if err := s.renderJobGroups(r, w, ""); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// deleteMany deletes several jobs at once. POST /jobs/delete with ids=<id>,<id>,...
+func (s *Server) deleteMany(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	var ids []string
+
+	for _, v := range r.Form["ids"] {
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				if _, err := uuid.Parse(id); err != nil {
+					http.Error(w, "Invalid ID", http.StatusUnprocessableEntity)
+
+					return
+				}
+
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	if len(ids) == 0 {
+		http.Error(w, "no jobs selected", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if err := s.svc.DeleteMany(r.Context(), ids); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
@@ -720,6 +815,21 @@ func (s *Server) apiDeleteJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+// proxyScrapeStatus tests the ProxyScrape API key. GET /proxyscrape/status[?refresh=1]
+func (s *Server) proxyScrapeStatus(w http.ResponseWriter, r *http.Request) {
+	st := s.svc.ProxyScrapeStatus(r.Context(), r.URL.Query().Get("refresh") == "1")
+
+	code := http.StatusOK
+	if !st.OK {
+		code = http.StatusBadGateway
+		if !st.Configured {
+			code = http.StatusServiceUnavailable
+		}
+	}
+
+	renderJSON(w, code, st)
 }
 
 func renderJSON(w http.ResponseWriter, code int, data any) {

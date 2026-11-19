@@ -248,6 +248,18 @@ func (s *Server) campaignDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if r.FormValue("delete_jobs") == "1" {
+		if _, err := s.svc.DeleteCampaignWithJobs(r.Context(), id); err != nil {
+			redirectQuery(w, r, "/campaigns", "error", publicErr(err))
+
+			return
+		}
+
+		redirectQuery(w, r, "/campaigns", "notice", "Campaign and its jobs deleted.")
+
+		return
+	}
+
 	if err := s.svc.DeleteCampaign(r.Context(), id); err != nil {
 		redirectQuery(w, r, "/campaigns", "error", publicErr(err))
 

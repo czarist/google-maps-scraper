@@ -264,17 +264,17 @@ html[data-theme="dark"] .theme-label-light {
 /* One row per service: name, label editor, action. */
 .service-item {
     display: grid;
-    grid-template-columns: minmax(140px, 1fr) minmax(220px, 2fr) 96px;
+    grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) auto;
     align-items: center;
-    gap: 16px;
-    padding: 12px 0;
+    gap: 12px 20px;
+    padding: 14px 0;
     border-bottom: 1px solid var(--line);
 }
 
 .service-id {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 4px;
     min-width: 0;
 }
 
@@ -283,10 +283,17 @@ html[data-theme="dark"] .theme-label-light {
     overflow-wrap: anywhere;
 }
 
+.service-id .hint {
+    margin: 0;
+    font-size: 0.8125rem;
+}
+
+/* The global form rule stacks fields; keep the label input and Save on one line. */
 .service-edit {
-    display: flex;
+    flex-direction: row;
     gap: 8px;
-    align-items: center;
+    align-items: stretch;
+    min-width: 0;
 }
 
 .service-edit input {
@@ -294,8 +301,26 @@ html[data-theme="dark"] .theme-label-light {
     min-width: 0;
 }
 
+.service-edit .btn-quiet {
+    flex: none;
+    justify-content: center;
+    min-width: 76px;
+}
+
 .service-action {
     justify-self: end;
+}
+
+.service-action form {
+    display: block;
+}
+
+.service-action .btn-danger {
+    border-color: var(--line);
+}
+
+.service-action .btn-danger:hover {
+    border-color: var(--pin);
 }
 
 .service-new-box {
@@ -860,7 +885,7 @@ tbody tr:last-child td {
     border-bottom: 0;
 }
 
-.job-table td:first-child {
+.job-table td.cell-select + td {
     min-width: 10rem;
 }
 
@@ -1385,7 +1410,7 @@ tr.is-new td {
         margin: 0;
     }
 
-    .job-table td:first-child {
+    .job-table td.cell-select + td {
         min-width: 0;
     }
 
@@ -1673,5 +1698,108 @@ tr.is-new td {
     #page-progress.is-loading,
     #page-progress.is-done {
         transition: none;
+    }
+}
+
+/* ProxyScrape status badge on the job form. */
+.ps-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding: 4px 12px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+    text-align: left;
+}
+
+.ps-badge[data-state="ok"] {
+    color: var(--ok-ink);
+    background: var(--ok-tint);
+    border-color: var(--ok);
+}
+
+.ps-badge[data-state="error"] {
+    color: var(--pin);
+    border-color: var(--pin);
+}
+
+.ps-badge:disabled {
+    cursor: progress;
+}
+
+/* Selecting several jobs to delete at once. */
+.job-table .cell-select {
+    width: 1%;
+    padding-right: 0;
+    vertical-align: top;
+}
+
+.cell-select input {
+    width: 18px;
+    height: 18px;
+    margin: 2px 0 0;
+    accent-color: var(--water);
+    cursor: pointer;
+}
+
+.bulk-bar {
+    position: sticky;
+    top: 8px;
+    z-index: 5;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin: 0 0 12px;
+    padding: 10px 14px;
+    background: var(--inset);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    font-weight: 600;
+}
+
+.bulk-bar[hidden] {
+    display: none;
+}
+
+.bulk-bar #bulk-count {
+    margin-right: auto;
+}
+
+/* Repeat the search in other cities: mode and state side by side. */
+.repeat-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.repeat-row select {
+    flex: 1 1 200px;
+    min-width: 0;
+}
+
+.repeat-row select[hidden] {
+    display: none;
+}
+
+.campaign-delete {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.campaign-delete .btn-danger {
+    border-color: var(--line);
+}
+
+@media (max-width: 640px) {
+    .job-table td.cell-select {
+        float: right;
+        width: auto;
     }
 }

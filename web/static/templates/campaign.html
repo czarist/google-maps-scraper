@@ -238,9 +238,17 @@
                 </div>
             </form>
 
-            <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
-                <button type="submit" class="btn-danger">{{t "Delete campaign"}}</button>
-            </form>
+            <div class="campaign-delete">
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
+                    <button type="submit" class="btn-danger">{{t "Delete campaign, keep jobs"}}</button>
+                </form>
+                {{if .Jobs}}
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign AND its %d jobs with their CSV files? Email settings and send history are removed too. This cannot be undone." (len .Jobs)}}">
+                    <input type="hidden" name="delete_jobs" value="1">
+                    <button type="submit" class="btn-danger">{{t "Delete campaign and its %d jobs" (len .Jobs)}}</button>
+                </form>
+                {{end}}
+            </div>
         </section>
 
         <section class="panel panel-history" aria-labelledby="history-title">

@@ -331,3 +331,59 @@ func TestIndexEnablesHTMXTemplateFragments(t *testing.T) {
 		t.Fatal("index.html must enable htmx template fragments, or the job list swap drops #job-tbody")
 	}
 }
+
+func TestScrapeRepeatsInCapitals(t *testing.T) {
+	repo := &mutableJobRepo{mockJobRepo: mockJobRepo{jobs: nil}}
+	srv := newTestServerWithRepo(t, repo)
+
+	form := url.Values{
+		"name": {"Cosméticos"}, "maxtime": {"4m"}, "keywords": {"cosméticos, porto alegre"},
+		"lang": {"pt"}, "zoom": {"15"}, "radius": {"10000"}, "latitude": {"0"}, "longitude": {"0"},
+		"depth": {"10"}, "repeat_cities": {RepeatCapitals},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/scrape", strings.NewReader(form.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec := httptest.NewRecorder()
+	srv.scrape(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if len(repo.jobs) != 27 {
+		t.Fatalf("got %d jobs, want 27", len(repo.jobs))
+	}
+
+	found := false
+
+	for _, j := range repo.jobs {
+		if j.Name == "Cosméticos · Curitiba/PR" && len(j.Data.Keywords) == 1 && j.Data.Keywords[0] == "cosméticos Curitiba PR" {
+			found = true
+		}
+	}
+
+	if !found {
+		t.Fatalf("no Curitiba job: %+v", repo.jobs[0])
+	}
+}
+
+func TestDeleteManyJobs(t *testing.T) {
+	repo := &mutableJobRepo{mockJobRepo: mockJobRepo{jobs: paginatedJobs(3)}}
+	srv := newTestServerWithRepo(t, repo)
+	ids := repo.jobs[0].ID + "," + repo.jobs[2].ID
+
+	req := httptest.NewRequest(http.MethodPost, "/jobs/delete", strings.NewReader(url.Values{"ids": {ids}}.Encode()))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec := httptest.NewRecorder()
+	srv.deleteMany(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	if len(repo.jobs) != 1 || repo.jobs[0].Name != "job-2" {
+		t.Fatalf("left %+v", repo.jobs)
+	}
+}

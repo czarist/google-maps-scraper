@@ -115,8 +115,9 @@
                     </form>
                     <div class="service-action">
                         {{if eq .Campaigns 0}}
-                        <form method="post" action="/campaigns/services/{{.Name}}/delete">
-                            <button type="submit" class="btn-quiet">{{t "Delete"}}</button>
+                        <form method="post" action="/campaigns/services/{{.Name}}/delete"
+                              hx-confirm="{{t `Delete the service "%s"? This cannot be undone.` .Label}}">
+                            <button type="submit" class="btn-danger">{{t "Delete"}}</button>
                         </form>
                         {{else}}<span class="status status-ok">{{t "In use"}}</span>{{end}}
                     </div>

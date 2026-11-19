@@ -75,6 +75,24 @@
                     </div>
                 </div>
 
+                <div class="field">
+                    <label for="repeat_cities">{{t "Repeat the search in other cities"}}</label>
+                    <div class="repeat-row">
+                        <select id="repeat_cities" name="repeat_cities" aria-describedby="repeat-hint">
+                            <option value="" data-count="1">{{t "Don't repeat"}}</option>
+                            <option value="capitals" data-count="{{.CapitalCount}}">{{t "All state capitals and DF (%d)" .CapitalCount}}</option>
+                            <option value="municipalities" data-count="{{.MunicipalityCount}}">{{t "All municipalities"}}</option>
+                        </select>
+                        <select id="repeat_uf" name="repeat_uf" aria-label="{{t "State"}}" hidden>
+                            <option value="" data-count="{{.MunicipalityCount}}">{{t "Whole country (%d)" .MunicipalityCount}}</option>
+                            {{range .RepeatUFs}}
+                            <option value="{{.UF}}" data-count="{{.Count}}">{{.UF}} ({{.Count}})</option>
+                            {{end}}
+                        </select>
+                    </div>
+                    <p class="hint" id="repeat-hint">{{t `Creates one job per city with the same settings. Write only what you are looking for (e.g. cosmetics) or "cosmetics, porto alegre": the city is replaced by each one on the list.`}}</p>
+                </div>
+
                 <div class="field field-narrow">
                     <label for="lang">{{t "Results language"}}</label>
                     <input type="text" id="lang" name="lang" value="{{.Language}}"
@@ -163,7 +181,18 @@
 
                         <fieldset>
                             <legend>{{t "Proxies"}}</legend>
-                            <div class="field">
+                            {{if .ProxyScrape}}
+                            <button type="button" id="proxyscrape-badge" class="ps-badge" data-state="loading"
+                                    title="{{t "Check again"}}" onclick="loadProxyScrape(true)">{{t "Checking ProxyScrape…"}}</button>
+                            <label class="check" for="proxy_manual">
+                                <input type="checkbox" id="proxy_manual" name="proxy_manual" onchange="toggleManualProxies()">
+                                <span>
+                                    {{t "Set proxies manually"}}
+                                    <small>{{t "Ignore ProxyScrape and use the list below."}}</small>
+                                </span>
+                            </label>
+                            {{end}}
+                            <div class="field" id="proxies-field" {{if .ProxyScrape}}hidden{{end}}>
                                 <label for="proxies">{{t "One proxy per line"}}</label>
                                 <textarea id="proxies" name="proxies" rows="4" wrap="off" spellcheck="false" aria-describedby="proxies-hint"
                                           placeholder="http://user:pass@host:port&#10;socks5://host:port">{{.ProxiesString}}</textarea>
@@ -191,6 +220,11 @@
                 <h2 id="jobs-title">{{t "Campaigns and jobs"}}</h2>
                 <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
             </div>
+            <div class="bulk-bar" id="bulk-bar" hidden>
+                <span id="bulk-count" aria-live="polite"></span>
+                <button type="button" class="btn-quiet" id="bulk-clear">{{t "Clear selection"}}</button>
+                <button type="button" class="btn-danger" id="bulk-delete">{{t "Delete selected"}}</button>
+            </div>
             <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
                 <p class="group-empty">{{t "Loading jobs…"}}</p>
             </div>
@@ -206,6 +240,35 @@
     <div id="map-modal-container"></div>
 
 <script>
+function toggleManualProxies() {
+    var manual = document.getElementById('proxy_manual');
+    var box = document.getElementById('proxies-field');
+    if (manual && box) box.hidden = !manual.checked;
+}
+
+// Shows whether the ProxyScrape API is reachable, its plan and how many online proxies it gives.
+function loadProxyScrape(refresh) {
+    var badge = document.getElementById('proxyscrape-badge');
+    if (!badge) return;
+    badge.disabled = true;
+    badge.dataset.state = 'loading';
+    badge.textContent = {{t "Checking ProxyScrape…"}};
+    fetch('/proxyscrape/status' + (refresh ? '?refresh=1' : '')).then(function (r) { return r.json(); }).then(function (st) {
+        if (!st.ok || st.proxy_count === 0) {
+            badge.dataset.state = 'error';
+            badge.textContent = '✗ ' + {{t "ProxyScrape unavailable"}} + ': ' + (st.error || st.proxy_error || {{t "no online proxies"}});
+            return;
+        }
+        var plans = (st.subaccounts || []).map(function (s) { return s.label || s.AccountType; }).join(', ');
+        badge.dataset.state = 'ok';
+        badge.textContent = '✓ ' + {{t "ProxyScrape API available"}} + ' · ' + plans + ' · ' +
+            {{t "{0} proxies online"}}.replace('{0}', st.proxy_count);
+    }).catch(function (e) {
+        badge.dataset.state = 'error';
+        badge.textContent = '✗ ' + e;
+    }).finally(function () { badge.disabled = false; });
+}
+
 function hideSponsor() {
     var el = document.getElementById('sponsor-section');
     if (el) el.hidden = true;
@@ -230,7 +293,8 @@ function hideSponsor() {
     var gutter = document.getElementById('query-gutter');
     var queryCount = document.getElementById('query-count');
 
-    var advancedFields = ['latitude', 'longitude', 'zoom', 'radius', 'depth', 'maxtime', 'fastmode', 'email', 'proxies'];
+    var advancedFields = ['latitude', 'longitude', 'zoom', 'radius', 'depth', 'maxtime', 'fastmode', 'email', 'proxy_manual', 'proxies'];
+    loadProxyScrape(false);
 
     // Server messages (plain text) mapped to the field they refer to.
     var errorRules = [
@@ -263,7 +327,7 @@ function hideSponsor() {
     }
 
     function refreshAdvancedState() {
-        var changed = advancedFields.filter(function (id) { return isChanged(field(id)); }).length;
+        var changed = advancedFields.filter(function (id) { return field(id) && isChanged(field(id)); }).length;
         advancedState.textContent = changed === 0 ? {{t "Defaults"}} : {{t "{0} changed"}}.replace('{0}', changed);
         advancedState.classList.toggle('is-changed', changed > 0);
         if (changed > 0) advanced.open = true;
@@ -375,8 +439,35 @@ function hideSponsor() {
         if (first) {
             e.preventDefault();
             showError({{t "Check the highlighted field before creating the job."}}, first);
+            return;
+        }
+        var total = repeatCount();
+        if (total > 1) {
+            e.preventDefault();
+            if (window.confirm({{t "This creates {0} jobs, one per city. Continue?"}}.replace('{0}', total))) {
+                e.detail.issueRequest(true);
+            }
         }
     });
+
+    // How many jobs the "repeat in other cities" choice creates.
+    function repeatCount() {
+        var mode = field('repeat_cities');
+        var uf = field('repeat_uf');
+        if (!mode || mode.value === '') return 1;
+        var sel = mode.value === 'municipalities' ? uf : mode;
+        return parseInt(sel.options[sel.selectedIndex].getAttribute('data-count'), 10) || 1;
+    }
+
+    function refreshRepeat() {
+        var mode = field('repeat_cities');
+        if (mode) field('repeat_uf').hidden = mode.value !== 'municipalities';
+    }
+
+    if (field('repeat_cities')) {
+        field('repeat_cities').addEventListener('change', refreshRepeat);
+        refreshRepeat();
+    }
 
     form.addEventListener('htmx:beforeRequest', function (e) {
         if (e.target !== form) return;
@@ -392,7 +483,10 @@ function hideSponsor() {
 
         if (e.detail.successful) {
             var name = field('name').value.trim();
-            statusBox.textContent = {{t `Job "{0}" created. It is at the top of the list.`}}.replace('{0}', name);
+            var created = repeatCount();
+            statusBox.textContent = created > 1
+                ? {{t "{0} jobs created, one per city. They run one after another."}}.replace('{0}', created)
+                : {{t `Job "{0}" created. It is at the top of the list.`}}.replace('{0}', name);
             // htmx 1.9 swaps before afterRequest, so the new rows are already in place.
             // The server marks the new row and opens its campaign.
             var row = document.querySelector('#job-groups tr.is-new');
@@ -530,10 +624,84 @@ function hideSponsor() {
         try { localStorage.setItem(openKey, JSON.stringify(saved)); } catch (err) {}
     }, true);
 
+    // Selecting several jobs to delete at once. The list refreshes every few
+    // seconds, so the selection lives here and is re-applied after each refresh.
+    var selectedJobs = {};
+
+    function selectedIDs() { return Object.keys(selectedJobs); }
+
+    function refreshBulkBar() {
+        var bar = document.getElementById('bulk-bar');
+        if (!bar) return;
+        var n = selectedIDs().length;
+        bar.hidden = n === 0;
+        document.getElementById('bulk-count').textContent = n === 1
+            ? {{t "1 job selected"}}
+            : {{t "{0} jobs selected"}}.replace('{0}', n);
+    }
+
+    function syncGroupBoxes(list) {
+        list.querySelectorAll('table.job-table').forEach(function (table) {
+            var boxes = table.querySelectorAll('input.job-select');
+            var checked = table.querySelectorAll('input.job-select:checked').length;
+            var all = table.querySelector('input.select-group');
+            if (!all) return;
+            all.checked = boxes.length > 0 && checked === boxes.length;
+            all.indeterminate = checked > 0 && checked < boxes.length;
+        });
+    }
+
+    function restoreSelection(list) {
+        var present = {};
+        list.querySelectorAll('input.job-select').forEach(function (box) {
+            present[box.value] = true;
+            box.checked = !!selectedJobs[box.value];
+        });
+        // Forget jobs that are gone (deleted elsewhere).
+        selectedIDs().forEach(function (id) { if (!present[id]) delete selectedJobs[id]; });
+        syncGroupBoxes(list);
+        refreshBulkBar();
+    }
+
+    document.addEventListener('change', function (e) {
+        var t = e.target;
+        if (t.matches && t.matches('input.job-select')) {
+            if (t.checked) selectedJobs[t.value] = true; else delete selectedJobs[t.value];
+        } else if (t.matches && t.matches('input.select-group')) {
+            t.closest('table').querySelectorAll('input.job-select').forEach(function (box) {
+                box.checked = t.checked;
+                if (t.checked) selectedJobs[box.value] = true; else delete selectedJobs[box.value];
+            });
+        } else {
+            return;
+        }
+        var list = document.getElementById('job-groups');
+        if (list) syncGroupBoxes(list);
+        refreshBulkBar();
+    });
+
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest) return;
+        if (e.target.closest('#bulk-clear')) {
+            selectedJobs = {};
+            var list = document.getElementById('job-groups');
+            if (list) restoreSelection(list);
+        } else if (e.target.closest('#bulk-delete')) {
+            var ids = selectedIDs();
+            if (ids.length === 0) return;
+            var msg = {{t "Delete {0} jobs and their CSV files? This cannot be undone."}}.replace('{0}', ids.length);
+            if (!window.confirm(msg)) return;
+            selectedJobs = {};
+            refreshBulkBar();
+            htmx.ajax('POST', '/jobs/delete', { target: '#job-groups', swap: 'outerHTML', values: { ids: ids.join(',') } });
+        }
+    });
+
     document.body.addEventListener('htmx:load', function (e) {
         if (e.detail && e.detail.elt && e.detail.elt.id === 'job-groups') {
             restoreOpenGroups(e.detail.elt);
             syncFromList(e.detail.elt);
+            restoreSelection(e.detail.elt);
         }
     });
 

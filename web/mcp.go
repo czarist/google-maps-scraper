@@ -3,8 +3,10 @@ package web
 import (
 	"context"
 	"encoding/csv"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 	"strings"
@@ -106,6 +108,17 @@ Example: {"name": "escolas poa", "searches": ["escolas porto alegre", "escolas c
 	mcp.AddTool(server, tool("test_proxies", "Test proxies",
 		"Check that each saved proxy can reach Google Maps. remove_failed=true deletes the ones that fail.",
 		external("")), s.mcpTestProxies)
+	mcp.AddTool(server, tool("proxyscrape_status", "ProxyScrape status",
+		"Test the ProxyScrape API key (PROXYSCRAPE_API_KEY in .env): plans, how many proxies it gives, wallet balance. When the key is set, new jobs use these proxies by default.",
+		external("")), s.mcpProxyScrapeStatus)
+	mcp.AddTool(server, tool("proxyscrape_order", "Order ProxyScrape proxies",
+		`Buy or renew a ProxyScrape plan, paid from the wallet. Without confirm it only quotes the price (dry run); show it to the user, then call again with confirm=true.
+Needs API ordering enabled by ProxyScrape support. Fields follow https://docs.proxyscrape.com/api/account/api-ordering
+Example: {"order": {"type": "new_datacenter_shared", "country": "Brazil", "proxies": 10, "days": 30, "is_subscription": false}}`,
+		writes("", false)), s.mcpProxyScrapeOrder)
+	mcp.AddTool(server, tool("proxyscrape_order_status", "ProxyScrape order status",
+		`Check a ProxyScrape order. When status is "processed", the new proxies are used by new jobs.`,
+		external("")), s.mcpProxyScrapeOrderStatus)
 
 	// Campaigns
 	mcp.AddTool(server, tool("list_campaigns", "List campaigns", "List campaigns with their job count and email status.", readOnly("")), s.mcpListCampaigns)
@@ -354,7 +367,7 @@ type createJobOutput struct {
 }
 
 func (s *Server) mcpCreateJob(ctx context.Context, _ *mcp.CallToolRequest, in createJobInput) (*mcp.CallToolResult, createJobOutput, error) {
-	job, err := s.buildJob(&in)
+	job, err := s.buildJob(ctx, &in)
 	if err != nil {
 		return nil, createJobOutput{}, err
 	}
@@ -391,7 +404,7 @@ func (s *Server) mcpCreateJob(ctx context.Context, _ *mcp.CallToolRequest, in cr
 	}, nil
 }
 
-func (s *Server) buildJob(in *createJobInput) (Job, error) {
+func (s *Server) buildJob(ctx context.Context, in *createJobInput) (Job, error) {
 	job := Job{
 		ID:     uuid.NewV4().String(),
 		Name:   strings.TrimSpace(in.Name),
@@ -438,12 +451,16 @@ func (s *Server) buildJob(in *createJobInput) (Job, error) {
 	}
 
 	if in.UseProxies == nil || *in.UseProxies {
-		saved, err := s.svc.SavedProxies()
+		saved, err := s.svc.DefaultProxies(ctx)
 		if err != nil {
 			return Job{}, err
 		}
 
 		job.Data.Proxies = saved
+	}
+
+	if len(job.Data.Proxies) == 0 && s.svc.RequiresProxies() {
+		return Job{}, ErrNoProxies
 	}
 
 	return job, job.Validate()
@@ -762,6 +779,69 @@ func (s *Server) mcpTestProxies(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 
 	return nil, out, nil
+}
+
+// ---------- ProxyScrape
+
+func (s *Server) mcpProxyScrapeStatus(ctx context.Context, _ *mcp.CallToolRequest, _ struct{}) (*mcp.CallToolResult, ProxyScrapeStatus, error) {
+	return nil, s.svc.ProxyScrapeStatus(ctx, true), nil
+}
+
+type proxyScrapeOrderInput struct {
+	Order   map[string]any `json:"order" jsonschema:"order fields from the ProxyScrape docs; must include type, e.g. new_datacenter_shared"`
+	Confirm bool           `json:"confirm,omitempty" jsonschema:"true places the real order and charges the wallet; otherwise only a price quote"`
+}
+
+type proxyScrapeOrderOutput struct {
+	DryRun   bool            `json:"dry_run"`
+	Result   json.RawMessage `json:"result"`
+	NextStep string          `json:"next_step"`
+}
+
+func (s *Server) mcpProxyScrapeOrder(ctx context.Context, _ *mcp.CallToolRequest, in proxyScrapeOrderInput) (*mcp.CallToolResult, proxyScrapeOrderOutput, error) {
+	ps, err := s.svc.ProxyScrapeClient()
+	if err != nil {
+		return nil, proxyScrapeOrderOutput{}, err
+	}
+
+	res, err := ps.CreateOrder(ctx, in.Order, !in.Confirm)
+	if err != nil {
+		return nil, proxyScrapeOrderOutput{}, err
+	}
+
+	out := proxyScrapeOrderOutput{DryRun: !in.Confirm, Result: res}
+	if in.Confirm {
+		out.NextStep = "Order placed. Call proxyscrape_order_status with the order id until status is processed."
+	} else {
+		out.NextStep = "This is only a quote. Ask the user, then call again with confirm=true to buy."
+	}
+
+	return nil, out, nil
+}
+
+type proxyScrapeOrderStatusInput struct {
+	OrderID string `json:"order_id" jsonschema:"order id returned by proxyscrape_order"`
+}
+
+func (s *Server) mcpProxyScrapeOrderStatus(ctx context.Context, _ *mcp.CallToolRequest, in proxyScrapeOrderStatusInput) (*mcp.CallToolResult, ProxyScrapeOrder, error) {
+	ps, err := s.svc.ProxyScrapeClient()
+	if err != nil {
+		return nil, ProxyScrapeOrder{}, err
+	}
+
+	order, err := ps.OrderStatus(ctx, strings.TrimSpace(in.OrderID))
+	if err != nil {
+		return nil, ProxyScrapeOrder{}, err
+	}
+
+	if order.Status == "processed" {
+		// Pick up the new plan's proxies right away.
+		if _, err := ps.CachedProxies(ctx, true); err != nil {
+			log.Printf("proxyscrape refresh: %v", err)
+		}
+	}
+
+	return nil, *order, nil
 }
 
 // ---------- campaigns

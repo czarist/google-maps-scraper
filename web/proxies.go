@@ -71,6 +71,85 @@ func (s *Service) SavedProxies() ([]string, error) {
 	return s.readProxies()
 }
 
+// ErrNoProxies stops a job that would otherwise reach Google with the server's own IP.
+var ErrNoProxies = errors.New("no working proxies: the job was not started so your IP is not exposed to Google. Check the ProxyScrape plan")
+
+// DefaultProxies returns the proxies new jobs use: the ProxyScrape account's
+// proxies when PROXYSCRAPE_API_KEY is set, otherwise the saved pool.
+// With ProxyScrape there is no fallback: if the API fails or has no online
+// proxies, it returns ErrNoProxies instead of letting the job connect directly.
+func (s *Service) DefaultProxies(ctx context.Context) ([]string, error) {
+	if s.proxyScrape == nil {
+		return s.SavedProxies()
+	}
+
+	proxies, err := s.proxyScrape.CachedProxies(ctx, false)
+	if err != nil {
+		return nil, fmt.Errorf("%w (ProxyScrape: %s)", ErrNoProxies, err.Error())
+	}
+
+	if len(proxies) == 0 {
+		return nil, ErrNoProxies
+	}
+
+	return proxies, nil
+}
+
+// RequiresProxies reports whether jobs must never run without a proxy.
+// It is true when ProxyScrape is configured.
+func (s *Service) RequiresProxies() bool {
+	return s.proxyScrape != nil
+}
+
+// proxyPreflightSample is how many of a job's proxies are tested before it starts.
+const proxyPreflightSample = 5
+
+// CheckJobProxies runs right before a job starts. When proxies are required it
+// refuses a job without proxies, and it refuses any job whose proxies cannot
+// reach Google Maps (for example, the plan expired while the job was queued).
+func (s *Service) CheckJobProxies(ctx context.Context, proxies []string) error {
+	if len(proxies) == 0 {
+		if s.RequiresProxies() {
+			return ErrNoProxies
+		}
+
+		return nil
+	}
+
+	sample := proxies[:min(len(proxies), proxyPreflightSample)]
+
+	var lastErr string
+
+	for _, r := range TestProxies(ctx, sample) {
+		if r.OK {
+			return nil
+		}
+
+		lastErr = r.Error
+	}
+
+	return fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, len(sample), lastErr)
+}
+
+// ProxyScrapeStatus tests the ProxyScrape API key and reports what it gives access to.
+// refresh downloads the proxy list again instead of using the cache.
+func (s *Service) ProxyScrapeStatus(ctx context.Context, refresh bool) ProxyScrapeStatus {
+	if s.proxyScrape == nil {
+		return ProxyScrapeStatus{Error: ErrProxyScrapeDisabled.Error()}
+	}
+
+	return s.proxyScrape.Status(ctx, refresh)
+}
+
+// ProxyScrapeClient returns the ProxyScrape client, or ErrProxyScrapeDisabled.
+func (s *Service) ProxyScrapeClient() (*ProxyScrape, error) {
+	if s.proxyScrape == nil {
+		return nil, ErrProxyScrapeDisabled
+	}
+
+	return s.proxyScrape, nil
+}
+
 func (s *Service) readProxies() ([]string, error) {
 	raw, err := os.ReadFile(s.proxiesPath())
 	if errors.Is(err, os.ErrNotExist) {

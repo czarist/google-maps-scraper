@@ -25,6 +25,9 @@ type Service struct {
 	dispatchSleep func(context.Context, time.Duration)
 	dispatchWait  func(lo, hi time.Duration) time.Duration
 
+	// proxyScrape supplies the default proxies when PROXYSCRAPE_API_KEY is set.
+	proxyScrape *ProxyScrape
+
 	// optOut answers unsubscribe lookups. When nil, every send is refused.
 	optOut OptOutChecker
 	// unsubscribeBase is the page linked from every message.
@@ -69,8 +72,9 @@ type jobCounter interface {
 
 func NewService(repo JobRepository, dataFolder string) *Service {
 	return &Service{
-		repo:       repo,
-		dataFolder: dataFolder,
+		repo:        repo,
+		dataFolder:  dataFolder,
+		proxyScrape: NewProxyScrapeFromEnv(),
 	}
 }
 
@@ -202,6 +206,17 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	}
 
 	return s.repo.Delete(ctx, id)
+}
+
+// DeleteMany deletes several jobs and their CSV files.
+func (s *Service) DeleteMany(ctx context.Context, ids []string) error {
+	for _, id := range ids {
+		if err := s.Delete(ctx, id); err != nil {
+			return fmt.Errorf("delete job %s: %w", id, err)
+		}
+	}
+
+	return nil
 }
 
 func (s *Service) Update(ctx context.Context, job *Job) error {

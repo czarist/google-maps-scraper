@@ -33,6 +33,7 @@
         <table class="job-table">
             <thead>
                 <tr>
+                    <th scope="col" class="cell-select"><input type="checkbox" class="select-group" aria-label="{{t "Select all jobs in this group"}}"></th>
                     <th scope="col">{{t "Job"}}</th>
                     <th scope="col">{{t "Created (UTC)"}}</th>
                     <th scope="col">{{t "Status"}}</th>
@@ -42,6 +43,7 @@
             <tbody>
             {{range .Jobs}}
             <tr{{if eq .ID $.NewJobID}} class="is-new"{{end}}>
+                <td class="cell-select"><input type="checkbox" class="job-select" value="{{.ID}}" aria-label="{{t "Select %s" .Name}}"></td>
                 <td data-label="{{t "Job"}}">
                     <span class="job-name">{{.Name}}</span>
                     <span class="job-id" title="{{.ID}}">{{.ID}}</span>
