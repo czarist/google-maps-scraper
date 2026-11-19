@@ -451,9 +451,24 @@ func (s *Service) DispatchRunning(ctx context.Context, campaignID string) (bool,
 }
 
 // StartDispatch sends the campaign mail in the background.
+// DispatchOptions controls who a send goes to.
+type DispatchOptions struct {
+	// Resend also sends to addresses that got the campaign at least ResendAfter ago.
+	Resend      bool
+	ResendAfter time.Duration
+	// SkipFailed leaves out addresses whose last send failed.
+	SkipFailed bool
+	// Quiet records nothing in the history when there is nothing to send.
+	Quiet bool
+}
+
 // StartDispatch sends the campaign to every address not sent yet. With resend,
 // addresses that got it at least resendAfter ago are sent again too.
 func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend bool, resendAfter time.Duration, send MailSender) (DispatchResult, error) {
+	return s.startDispatch(ctx, campaignID, DispatchOptions{Resend: resend, ResendAfter: resendAfter}, send)
+}
+
+func (s *Service) startDispatch(ctx context.Context, campaignID string, opts DispatchOptions, send MailSender) (DispatchResult, error) {
 	store, err := s.campaignStore()
 	if err != nil {
 		return DispatchResult{}, err
@@ -501,8 +516,8 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 
 	var since *time.Time
 
-	if resend {
-		t := time.Now().UTC().Add(-max(resendAfter, 0))
+	if opts.Resend {
+		t := time.Now().UTC().Add(-max(opts.ResendAfter, 0))
 		since = &t
 	}
 
@@ -511,9 +526,19 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 		return DispatchResult{}, err
 	}
 
+	if opts.SkipFailed {
+		if recs, err = dropFailed(ctx, store, campaignID, recs); err != nil {
+			return DispatchResult{}, err
+		}
+	}
+
 	msgs, renderFailed, err := prepareMessages(&cfg, recs)
 	if err != nil {
 		return DispatchResult{}, err
+	}
+
+	if len(msgs) == 0 && opts.Quiet {
+		return DispatchResult{Detail: "Nothing new to send."}, nil
 	}
 
 	if len(msgs) == 0 {

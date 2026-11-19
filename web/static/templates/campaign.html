@@ -246,6 +246,31 @@
                 </div>
             </form>
 
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/auto" class="auto-dispatch">
+                <h3>{{t "Automatic sending"}} <span class="status {{if .Auto.Enabled}}status-ok{{else}}status-pending{{end}}">{{if .Auto.Enabled}}{{t "On"}}{{else}}{{t "Off"}}{{end}}</span></h3>
+                <label class="check" for="auto_enabled">
+                    <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
+                    <span>
+                        {{t "Send automatically to new addresses"}}
+                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same 10-per-batch rhythm. Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send."}}</small>
+                    </span>
+                </label>
+                <label class="check" for="auto_resend">
+                    <input type="checkbox" id="auto_resend" name="auto_resend" {{if .Auto.Resend}}checked{{end}}>
+                    <span>{{t "Also send again to addresses that received it before"}}</span>
+                </label>
+                <div class="field resend-after">
+                    <label for="auto_resend_after_days">{{t "Only if they received it at least"}}</label>
+                    <div class="resend-after-input">
+                        <input type="number" id="auto_resend_after_days" name="auto_resend_after_days" value="{{.Auto.ResendAfterDays}}" min="0" step="1" inputmode="numeric">
+                        <span>{{t "days ago"}}</span>
+                    </div>
+                </div>
+                <div class="submit-row">
+                    <button type="submit" class="btn-quiet">{{t "Save automatic sending"}}</button>
+                </div>
+            </form>
+
             <div class="campaign-delete">
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
                     <button type="submit" class="btn-danger">{{t "Delete campaign, keep jobs"}}</button>

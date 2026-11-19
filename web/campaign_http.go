@@ -39,6 +39,7 @@ type campaignView struct {
 	Running        bool
 	RunningDetail  string
 	PreviewWarning string
+	Auto           AutoDispatch
 	Stats          CampaignStats
 }
 
@@ -214,7 +215,46 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		Stats:          stats,
 	}
 
+	if view.Auto, err = s.svc.GetAutoDispatch(r.Context(), id); err != nil {
+		log.Printf("auto dispatch setting %s: %v", id, err)
+	}
+
 	return view, nil
+}
+
+// campaignAuto saves the automatic sending setting. POST /campaigns/{id}/auto
+func (s *Server) campaignAuto(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		if err := r.ParseForm(); err != nil {
+			return err
+		}
+
+		days := DefaultResendAfter
+		a := AutoDispatch{
+			Enabled:         r.Form.Get("auto_enabled") == formChecked,
+			Resend:          r.Form.Get("auto_resend") == formChecked,
+			ResendAfterDays: int(days / (24 * time.Hour)),
+		}
+
+		if raw := strings.TrimSpace(r.Form.Get("auto_resend_after_days")); raw != "" {
+			n, err := strconv.Atoi(raw)
+			if err != nil || n < 0 {
+				return errors.New("resend interval must be a whole number of days, 0 or more")
+			}
+
+			a.ResendAfterDays = n
+		}
+
+		if err := s.svc.SaveAutoDispatch(r.Context(), id, a); err != nil {
+			return err
+		}
+
+		if a.Enabled {
+			return errNotice("Automatic sending is on. New addresses are sent within a minute.")
+		}
+
+		return errNotice("Automatic sending is off.")
+	}, "")
 }
 
 func (s *Server) campaignRename(w http.ResponseWriter, r *http.Request) {

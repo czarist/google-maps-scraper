@@ -88,6 +88,7 @@ func New(svc *Service, addr string) (*Server, error) {
 	mux.HandleFunc("/campaigns/{id}/mail/check", ans.campaignMailCheck)
 	mux.HandleFunc("/campaigns/{id}/mail/preview", ans.campaignMailPreview)
 	mux.HandleFunc("/campaigns/{id}/dispatch", ans.campaignDispatch)
+	mux.HandleFunc("/campaigns/{id}/auto", ans.campaignAuto)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 
@@ -175,6 +176,9 @@ func New(svc *Service, addr string) (*Server, error) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	// Automatic sending: campaigns with it on get new addresses sent without a click.
+	go s.svc.RunAutoDispatch(ctx, s.sendMail, AutoDispatchInterval)
+
 	go func(shutdownSource context.Context) {
 		<-shutdownSource.Done()
 

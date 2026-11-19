@@ -73,6 +73,15 @@ func ensureCampaignSchema(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_campaign_dispatches_campaign
 			ON campaign_dispatches (campaign_id, started_at);
+
+		CREATE TABLE IF NOT EXISTS campaign_auto (
+			campaign_id TEXT PRIMARY KEY,
+			enabled INT NOT NULL DEFAULT 0,
+			resend INT NOT NULL DEFAULT 0,
+			resend_after_days INT NOT NULL DEFAULT 4,
+			updated_at INT NOT NULL,
+			FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+		);
 	`)
 	if err != nil {
 		return err

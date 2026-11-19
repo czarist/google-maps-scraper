@@ -1818,3 +1818,18 @@ tr.is-new td {
 .resend-after-input input {
     width: 6rem;
 }
+
+/* Automatic sending settings on the campaign page. */
+.auto-dispatch {
+    margin-top: 24px;
+    padding-top: 18px;
+    border-top: 1px solid var(--line);
+    gap: 4px;
+}
+
+.auto-dispatch h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+}
