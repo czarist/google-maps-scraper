@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 	"uuid"
 )
 
@@ -406,7 +407,17 @@ func (s *Server) campaignDispatch(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		result, err := s.svc.StartDispatch(r.Context(), id, r.Form.Get("resend") == formChecked, s.sendMail)
+		resendAfter := DefaultResendAfter
+		if raw := strings.TrimSpace(r.Form.Get("resend_after_days")); raw != "" {
+			days, err := strconv.Atoi(raw)
+			if err != nil || days < 0 {
+				return errors.New("resend interval must be a whole number of days, 0 or more")
+			}
+
+			resendAfter = time.Duration(days) * 24 * time.Hour
+		}
+
+		result, err := s.svc.StartDispatch(r.Context(), id, r.Form.Get("resend") == formChecked, resendAfter, s.sendMail)
 		if err != nil {
 			return err
 		}

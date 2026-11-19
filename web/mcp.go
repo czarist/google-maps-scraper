@@ -1273,7 +1273,9 @@ func (s *Server) mcpSendTestMail(ctx context.Context, _ *mcp.CallToolRequest, in
 type dispatchInput struct {
 	Campaign string `json:"campaign" jsonschema:"campaign name or id"`
 	Confirm  bool   `json:"confirm,omitempty" jsonschema:"true to really send; only after the user agreed"`
-	Resend   bool   `json:"resend,omitempty" jsonschema:"also send to addresses that already got this campaign"`
+	Resend   bool   `json:"resend,omitempty" jsonschema:"also send again to addresses that already got this campaign, if it was at least resend_after_days ago"`
+	// ResendAfterDays is a pointer so 0 (resend to everyone) differs from unset (default 4 days).
+	ResendAfterDays *int `json:"resend_after_days,omitempty" jsonschema:"with resend, only addresses that got it at least this many days ago (default 4)"`
 }
 
 type dispatchOutput struct {
@@ -1311,7 +1313,16 @@ func (s *Server) mcpStartDispatch(ctx context.Context, _ *mcp.CallToolRequest, i
 		}, nil
 	}
 
-	res, err := s.svc.StartDispatch(ctx, c.ID, in.Resend, s.sendMail)
+	resendAfter := DefaultResendAfter
+	if in.ResendAfterDays != nil {
+		if *in.ResendAfterDays < 0 {
+			return nil, dispatchOutput{}, errors.New("resend_after_days must be 0 or more")
+		}
+
+		resendAfter = time.Duration(*in.ResendAfterDays) * 24 * time.Hour
+	}
+
+	res, err := s.svc.StartDispatch(ctx, c.ID, in.Resend, resendAfter, s.sendMail)
 	if err != nil {
 		return nil, dispatchOutput{}, errors.New(publicErr(err))
 	}

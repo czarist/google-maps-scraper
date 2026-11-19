@@ -141,7 +141,7 @@ func TestDispatchSkipsSentAddresses(t *testing.T) {
 		return nil
 	}
 
-	result, err := svc.StartDispatch(ctx, "camp", false, sender)
+	result, err := svc.StartDispatch(ctx, "camp", false, web.DefaultResendAfter, sender)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -222,3 +222,43 @@ type allowAll struct{}
 func (allowAll) OptedOut(context.Context, string, string) (bool, error) { return false, nil }
 
 func (allowAll) ServiceExists(context.Context, string) (bool, error) { return true, nil }
+
+func TestSentEmailsSinceUsesTheResendWindow(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateCampaign(ctx, &web.Campaign{ID: "camp", Name: "Camp", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for _, e := range []string{"old@x.test", "new@x.test"} {
+		if err := repo.RecordMail(ctx, "camp", e, web.MailStatusSent, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := repo.RecordMail(ctx, "camp", "out@x.test", web.MailStatusUnsubscribed, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	fiveDaysAgo := time.Now().Add(-5 * 24 * time.Hour).Unix()
+	if _, err := repo.db.Exec(`UPDATE campaign_mail_log SET sent_at = ? WHERE email IN ('old@x.test', 'out@x.test')`, fiveDaysAgo); err != nil {
+		t.Fatal(err)
+	}
+
+	// Window of 4 days: "old" got it 5 days ago, so it may be sent again.
+	got, err := repo.SentEmailsSince(ctx, "camp", time.Now().Add(-web.DefaultResendAfter))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := got["old@x.test"]; ok {
+		t.Fatalf("old address must be resendable: %v", got)
+	}
+
+	for _, e := range []string{"new@x.test", "out@x.test"} {
+		if _, ok := got[e]; !ok {
+			t.Fatalf("%s must be skipped: %v", e, got)
+		}
+	}
+}

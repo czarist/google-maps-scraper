@@ -233,6 +233,14 @@
                     <input type="checkbox" id="resend" name="resend">
                     <span>{{t "Send again to addresses that already received this campaign"}}</span>
                 </label>
+                <div class="field resend-after">
+                    <label for="resend_after_days">{{t "Only if they received it at least"}}</label>
+                    <div class="resend-after-input">
+                        <input type="number" id="resend_after_days" name="resend_after_days" value="4" min="0" step="1" inputmode="numeric">
+                        <span>{{t "days ago"}}</span>
+                    </div>
+                    <p class="hint">{{t "Applies only when sending again. 0 sends again to everyone."}}</p>
+                </div>
                 <div class="submit-row">
                     <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Running}}{{t "Sending"}}{{else}}{{t "Send emails"}}{{end}}</button>
                 </div>

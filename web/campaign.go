@@ -43,6 +43,9 @@ const (
 	maxSMTPHostLen     = 255
 	dispatchStaleAfter = 2 * time.Hour
 
+	// DefaultResendAfter is the default wait before an address can get the same campaign again.
+	DefaultResendAfter = 4 * 24 * time.Hour
+
 	// mailBatchSize is how many messages go out before the longer pause.
 	mailBatchSize = 10
 	// intraBatchMinWait and intraBatchMaxWait are the pause between messages in one batch.
@@ -321,6 +324,9 @@ type CampaignStore interface {
 	SaveMail(context.Context, string, *MailConfig) error
 	// SentEmails returns addresses not to queue again: sent or unsubscribed.
 	SentEmails(context.Context, string) (map[string]struct{}, error)
+	// SentEmailsSince is like SentEmails but only counts sends after since.
+	// Unsubscribed addresses are always included.
+	SentEmailsSince(context.Context, string, time.Time) (map[string]struct{}, error)
 	RecordMail(context.Context, string, string, string, string) error
 	MailLog(context.Context, string) ([]MailLogEntry, error)
 	InsertDispatch(context.Context, *Dispatch) error

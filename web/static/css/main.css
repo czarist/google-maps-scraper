@@ -1803,3 +1803,18 @@ tr.is-new td {
         width: auto;
     }
 }
+
+/* Resend interval next to "send again". */
+.resend-after {
+    margin-top: 10px;
+}
+
+.resend-after-input {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.resend-after-input input {
+    width: 6rem;
+}

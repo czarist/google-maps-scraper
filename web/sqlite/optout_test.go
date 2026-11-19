@@ -78,7 +78,7 @@ func TestRetryAndResendPassTheUnsubscribeCheck(t *testing.T) {
 	}
 
 	for _, resend := range []bool{false, true} {
-		if _, err := svc.StartDispatch(ctx, "camp", resend, sender); err != nil {
+		if _, err := svc.StartDispatch(ctx, "camp", resend, 0, sender); err != nil {
 			t.Fatalf("start resend=%v: %v", resend, err)
 		}
 

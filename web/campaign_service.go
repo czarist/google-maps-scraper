@@ -451,7 +451,9 @@ func (s *Service) DispatchRunning(ctx context.Context, campaignID string) (bool,
 }
 
 // StartDispatch sends the campaign mail in the background.
-func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend bool, send MailSender) (DispatchResult, error) {
+// StartDispatch sends the campaign to every address not sent yet. With resend,
+// addresses that got it at least resendAfter ago are sent again too.
+func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend bool, resendAfter time.Duration, send MailSender) (DispatchResult, error) {
 	store, err := s.campaignStore()
 	if err != nil {
 		return DispatchResult{}, err
@@ -497,12 +499,16 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 		return DispatchResult{}, err
 	}
 
-	skipped := 0
-	if !resend {
-		recs, skipped, err = dropSent(ctx, store, campaignID, recs)
-		if err != nil {
-			return DispatchResult{}, err
-		}
+	var since *time.Time
+
+	if resend {
+		t := time.Now().UTC().Add(-max(resendAfter, 0))
+		since = &t
+	}
+
+	recs, skipped, err := dropSent(ctx, store, campaignID, recs, since)
+	if err != nil {
+		return DispatchResult{}, err
 	}
 
 	msgs, renderFailed, err := prepareMessages(&cfg, recs)
@@ -610,8 +616,20 @@ func emptyDispatchDetail(skipped, missing, failed int) string {
 	}
 }
 
-func dropSent(ctx context.Context, store CampaignStore, campaignID string, recs []Recipient) ([]Recipient, int, error) {
-	sent, err := store.SentEmails(ctx, campaignID)
+// dropSent removes addresses that already got the campaign. With since set,
+// only sends at or after since count, so older recipients get it again.
+func dropSent(ctx context.Context, store CampaignStore, campaignID string, recs []Recipient, since *time.Time) ([]Recipient, int, error) {
+	var (
+		sent map[string]struct{}
+		err  error
+	)
+
+	if since == nil {
+		sent, err = store.SentEmails(ctx, campaignID)
+	} else {
+		sent, err = store.SentEmailsSince(ctx, campaignID, *since)
+	}
+
 	if err != nil {
 		return nil, 0, err
 	}

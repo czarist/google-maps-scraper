@@ -429,6 +429,11 @@ func (m *memStore) SaveMail(_ context.Context, campaignID string, cfg *MailConfi
 	return nil
 }
 
+// SentEmailsSince ignores since: the in-memory store keeps no send times.
+func (m *memStore) SentEmailsSince(ctx context.Context, campaignID string, _ time.Time) (map[string]struct{}, error) {
+	return m.SentEmails(ctx, campaignID)
+}
+
 func (m *memStore) SentEmails(_ context.Context, campaignID string) (map[string]struct{}, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

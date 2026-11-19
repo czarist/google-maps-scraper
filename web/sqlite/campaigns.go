@@ -469,6 +469,23 @@ func (repo *repo) SentEmails(ctx context.Context, campaignID string) (map[string
 		return nil, err
 	}
 
+	return scanEmails(rows)
+}
+
+// SentEmailsSince returns addresses sent after since, plus every unsubscribed address.
+func (repo *repo) SentEmailsSince(ctx context.Context, campaignID string, since time.Time) (map[string]struct{}, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT email FROM campaign_mail_log
+		WHERE campaign_id = ? AND (status = ? OR (status = ? AND sent_at > ?))
+	`, campaignID, web.MailStatusUnsubscribed, web.MailStatusSent, since.UTC().Unix())
+	if err != nil {
+		return nil, err
+	}
+
+	return scanEmails(rows)
+}
+
+func scanEmails(rows *sql.Rows) (map[string]struct{}, error) {
 	defer func() {
 		_ = rows.Close()
 	}()
