@@ -272,7 +272,10 @@
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/failed">
                     <button type="submit" class="btn-quiet">{{t "Send again to the %d failed addresses" .Stats.SendFailed}}</button>
                 </form>
-                <p class="hint">{{t "Queues again only the addresses whose last send failed. Addresses not sent yet are left for Send emails."}}</p>
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/requeue">
+                    <button type="submit" class="btn-quiet">{{t "Move the %d failed addresses back to waiting" .Stats.SendFailed}}</button>
+                </form>
+                <p class="hint">{{t "Send again sends only the failed addresses now. Move back to waiting sends nothing now: the failed addresses join the ones waiting to be sent and go out with the next send, manual or automatic."}}</p>
                 {{end}}
             </div>
 

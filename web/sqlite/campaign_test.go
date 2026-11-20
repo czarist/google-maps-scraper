@@ -223,6 +223,46 @@ func (allowAll) OptedOut(context.Context, string, string) (bool, error) { return
 
 func (allowAll) ServiceExists(context.Context, string) (bool, error) { return true, nil }
 
+func TestRequeueFailedForgetsOnlyFailedSends(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	if err := repo.CreateCampaign(ctx, &web.Campaign{ID: "camp", Name: "Camp", CreatedAt: time.Now()}); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	for email, status := range map[string]string{
+		"bad1@x.test": web.MailStatusFailed,
+		"bad2@x.test": web.MailStatusFailed,
+		"ok@x.test":   web.MailStatusSent,
+		"out@x.test":  web.MailStatusUnsubscribed,
+	} {
+		if err := repo.RecordMail(ctx, "camp", email, status, ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := repo.RequeueFailed(ctx, "camp")
+	if err != nil || n != 2 {
+		t.Fatalf("RequeueFailed = %d, %v; want 2, nil", n, err)
+	}
+
+	log, err := repo.MailLog(ctx, "camp")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(log) != 2 {
+		t.Fatalf("mail log after requeue = %v, want the sent and unsubscribed rows", log)
+	}
+
+	for _, e := range log {
+		if e.Status == web.MailStatusFailed {
+			t.Fatalf("failed row %s still in the log", e.Email)
+		}
+	}
+}
+
 func TestSentEmailsSinceUsesTheResendWindow(t *testing.T) {
 	repo := newTestRepo(t)
 	ctx := context.Background()

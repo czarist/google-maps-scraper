@@ -326,6 +326,9 @@ type CampaignStore interface {
 	// Unsubscribed addresses are always included.
 	SentEmailsSince(context.Context, string, time.Time) (map[string]struct{}, error)
 	RecordMail(context.Context, string, string, string, string) error
+	// RequeueFailed forgets the failed sends of a campaign so those addresses
+	// wait to be sent again. It returns how many addresses were requeued.
+	RequeueFailed(context.Context, string) (int, error)
 	MailLog(context.Context, string) ([]MailLogEntry, error)
 	InsertDispatch(context.Context, *Dispatch) error
 	UpdateDispatch(context.Context, *Dispatch) error

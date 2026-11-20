@@ -478,6 +478,22 @@ func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend b
 	return s.startDispatch(ctx, campaignID, DispatchOptions{Resend: resend, ResendAfter: resendAfter}, send)
 }
 
+// RequeueFailed puts the addresses whose last send failed back among the ones
+// waiting to be sent, without sending anything now. The next dispatch, manual
+// or automatic, sends them with the rest.
+func (s *Service) RequeueFailed(ctx context.Context, campaignID string) (int, error) {
+	store, err := s.campaignStore()
+	if err != nil {
+		return 0, err
+	}
+
+	if _, err := store.GetCampaign(ctx, campaignID); err != nil {
+		return 0, err
+	}
+
+	return store.RequeueFailed(ctx, campaignID)
+}
+
 // RetryFailedDispatch queues again only the addresses whose last send failed
 // and sends them now, without reaching addresses not sent yet.
 func (s *Service) RetryFailedDispatch(ctx context.Context, campaignID string, send MailSender) (DispatchResult, error) {

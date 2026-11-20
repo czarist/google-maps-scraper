@@ -464,6 +464,23 @@ func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, reas
 	return nil
 }
 
+func (m *memStore) RequeueFailed(_ context.Context, campaignID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	n := 0
+
+	for email, status := range m.sent[campaignID] {
+		if status == MailStatusFailed {
+			delete(m.sent[campaignID], email)
+			delete(m.reasons[campaignID], email)
+			n++
+		}
+	}
+
+	return n, nil
+}
+
 func (m *memStore) MailLog(_ context.Context, campaignID string) ([]MailLogEntry, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

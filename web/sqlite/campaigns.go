@@ -564,6 +564,21 @@ func (repo *repo) RecordMail(ctx context.Context, campaignID, email, status, err
 	return err
 }
 
+// RequeueFailed deletes the failed send rows of a campaign. With no row left,
+// those addresses count as not sent and wait for the next dispatch.
+func (repo *repo) RequeueFailed(ctx context.Context, campaignID string) (int, error) {
+	res, err := repo.db.ExecContext(ctx, `
+		DELETE FROM campaign_mail_log WHERE campaign_id = ? AND status = ?
+	`, campaignID, web.MailStatusFailed)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := res.RowsAffected()
+
+	return int(n), err
+}
+
 func (repo *repo) InsertDispatch(ctx context.Context, d *web.Dispatch) error {
 	_, err := repo.db.ExecContext(ctx, `
 		INSERT INTO campaign_dispatches (

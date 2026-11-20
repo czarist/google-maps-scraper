@@ -503,6 +503,22 @@ func (s *Server) campaignDispatchFailed(w http.ResponseWriter, r *http.Request) 
 	}, "")
 }
 
+// campaignRequeueFailed puts the failed addresses back among those waiting to be sent.
+func (s *Server) campaignRequeueFailed(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		n, err := s.svc.RequeueFailed(r.Context(), id)
+		if err != nil {
+			return err
+		}
+
+		if n == 0 {
+			return errNotice("No failed addresses to send again.")
+		}
+
+		return errNotice(trFrom(r, "%d failed addresses are waiting to be sent again.", n))
+	}, "")
+}
+
 // campaignDispatchPause pauses the running dispatch before its next email.
 func (s *Server) campaignDispatchPause(w http.ResponseWriter, r *http.Request) {
 	s.postCampaign(w, r, s.svc.PauseDispatch, "Sending paused. You can change the email settings and resume.")
