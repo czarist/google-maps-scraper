@@ -237,7 +237,7 @@
             <h2>{{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
-            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, 10 at a time, with a pause between messages and a longer pause between batches."}}</p>
+            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, one at a time, with a random 1 to 4 second pause between messages."}}</p>
             </div>
             <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
                 <label class="check" for="resend">

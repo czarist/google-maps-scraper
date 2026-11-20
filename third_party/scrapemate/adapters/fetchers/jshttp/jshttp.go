@@ -3,6 +3,7 @@ package jshttp
 import (
 	"context"
 	"errors"
+	"log"
 	"sync"
 	"time"
 
@@ -16,16 +17,29 @@ var _ scrapemate.HTTPFetcher = (*jsFetch)(nil)
 
 // closeTimeout is the maximum time allowed for a Playwright page.Close() before
 // the caller abandons it. A wedged Playwright driver (e.g. EPIPE after a browser
-// crash) can make Close block forever; abandoning it frees the worker goroutine
-// at the cost of leaking the underlying resource.
+// crash) can make Close block forever; abandoning it frees the worker goroutine.
+// The abandoned page lives until its browser is recycled or the fetcher is
+// closed, and jsFetch.Close kills the driver and its browsers if they hang, so
+// nothing outlives the fetcher.
 const closeTimeout = 5 * time.Second
 
+const (
+	// browsersCloseTimeout bounds closing all browsers when the fetcher closes.
+	browsersCloseTimeout = 15 * time.Second
+	// driverStopTimeout bounds stopping the Playwright driver process.
+	driverStopTimeout = 5 * time.Second
+)
+
+// errFetcherClosed is returned to fetches made after the fetcher was closed.
+var errFetcherClosed = errors.New("jshttp: fetcher closed")
+
 // closeWithTimeout runs closer in a background goroutine and returns when it
-// completes or when d elapses, whichever comes first. On timeout the goroutine
-// is abandoned (it will finish on its own if the driver recovers). Without this
-// bound, a hung Close propagates through the worker WaitGroup and prevents the
-// caller from being unblocked even by context cancellation.
-func closeWithTimeout(closer func() error, d time.Duration) {
+// completes or when d elapses, whichever comes first. It reports whether closer
+// finished in time. On timeout the goroutine is abandoned (it finishes once the
+// driver recovers or is killed). Without this bound, a hung Close propagates
+// through the worker WaitGroup and prevents the caller from being unblocked
+// even by context cancellation.
+func closeWithTimeout(closer func() error, d time.Duration) bool {
 	done := make(chan struct{})
 
 	go func() {
@@ -34,9 +48,14 @@ func closeWithTimeout(closer func() error, d time.Duration) {
 		close(done)
 	}()
 
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+
 	select {
 	case <-done:
-	case <-time.After(d):
+		return true
+	case <-timer.C:
+		return false
 	}
 }
 
@@ -76,6 +95,8 @@ func New(params JSFetcherOptions) (scrapemate.HTTPFetcher, error) {
 		if len(proxies) > 0 {
 			pool, err = NewProxyPool(proxies)
 			if err != nil {
+				stopDriver(pw)
+
 				return nil, err
 			}
 		}
@@ -96,6 +117,7 @@ func New(params JSFetcherOptions) (scrapemate.HTTPFetcher, error) {
 		proxyPool:          pool,
 		rotator:            params.Rotator,
 		maxPagesPerBrowser: maxPagesPerBrowser,
+		closed:             make(chan struct{}),
 	}
 
 	if maxPagesPerBrowser > 1 {
@@ -154,36 +176,88 @@ type jsFetch struct {
 
 	directMu sync.Mutex
 	direct   *browser
+
+	// closed is closed when Close starts; fetches still running then give
+	// their slots back to nobody instead of the (drained) pool.
+	closed    chan struct{}
+	closeOnce sync.Once
 }
 
 func (o *jsFetch) getSlot(ctx context.Context) (*sessionSlot, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	case <-o.closed:
+		return nil, errFetcherClosed
 	case slot := <-o.slots:
 		return slot, nil
 	}
 }
 
 func (o *jsFetch) putSlot(ctx context.Context, slot *sessionSlot) {
+	// Checked first so a closed fetcher never gets a slot back, even when the
+	// pool has room. The slots channel is never closed, so sending is safe.
+	select {
+	case <-o.closed:
+		_ = slot.close()
+
+		return
+	default:
+	}
+
 	select {
 	case <-ctx.Done():
+		_ = slot.close()
+	case <-o.closed:
 		_ = slot.close()
 	case o.slots <- slot:
 	}
 }
 
+// Close closes every browser and stops the Playwright driver. It never blocks
+// for more than browsersCloseTimeout+driverStopTimeout: if the browsers or the
+// driver hang, the driver process and all browsers it launched are killed, so
+// no process outlives the fetcher. It is safe to call more than once and
+// concurrently with running fetches.
 func (o *jsFetch) Close() error {
+	o.closeOnce.Do(o.shutdown)
+
+	return nil
+}
+
+func (o *jsFetch) shutdown() {
+	if o.closed != nil {
+		close(o.closed)
+	}
+
+	closeWithTimeout(func() error {
+		o.closeBrowsers()
+
+		return nil
+	}, browsersCloseTimeout)
+
+	if o.pw != nil {
+		stopDriver(o.pw)
+	}
+}
+
+// closeBrowsers closes the browsers of every pool. Slots held by running
+// fetches are closed by putSlot when those fetches finish.
+func (o *jsFetch) closeBrowsers() {
 	if o.pageSlots != nil {
 		o.pageSlots.close()
 	}
 
-	if o.slots != nil {
-		close(o.slots)
+	for o.slots != nil {
+		select {
+		case slot := <-o.slots:
+			_ = slot.close()
 
-		for slot := range o.slots {
-			slot.close()
+			continue
+		default:
 		}
+
+		break
 	}
 
 	o.directMu.Lock()
@@ -194,10 +268,28 @@ func (o *jsFetch) Close() error {
 	}
 
 	o.directMu.Unlock()
+}
 
-	_ = o.pw.Stop()
+// stopDriver stops the Playwright driver and makes sure neither it nor any
+// browser it launched keeps running. Without the kill, a driver whose Stop hangs
+// stays alive for as long as the process runs, together with its browsers.
+func stopDriver(pw *playwright.Playwright) {
+	// Taken before stopping: once the driver exits, its browsers are re-parented
+	// and can no longer be found from its PID.
+	procs := processTree(pw.Pid())
 
-	return nil
+	if closeWithTimeout(pw.Stop, driverStopTimeout) {
+		// The driver exited and was reaped; only browsers it left behind remain.
+		if len(procs) > 1 {
+			procs = procs[1:]
+		} else {
+			procs = nil
+		}
+	}
+
+	if n := killProcesses(procs); n > 0 {
+		log.Printf("jshttp: killed %d leftover playwright process(es) of driver pid %d", n, pw.Pid())
+	}
 }
 
 // Fetch fetches the url specicied by the job and returns the response
@@ -285,6 +377,12 @@ func (o *jsFetch) fetchWithoutProxy(ctx context.Context, job scrapemate.IJob) sc
 func (o *jsFetch) directBrowser() (*browser, error) {
 	o.directMu.Lock()
 	defer o.directMu.Unlock()
+
+	select {
+	case <-o.closed:
+		return nil, errFetcherClosed
+	default:
+	}
 
 	if o.direct != nil {
 		return o.direct, nil

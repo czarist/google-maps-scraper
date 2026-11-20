@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/cookiejar"
+	"sync"
 	"time"
 
 	"github.com/gosom/scrapemate"
@@ -27,6 +28,12 @@ type ScrapemateApp struct {
 
 	provider scrapemate.JobProvider
 	cacher   scrapemate.Cacher
+
+	// fetcher is the HTTP fetcher (and its browsers) of the running app. Close
+	// shuts it down even while Start is stuck, so a hung run cannot keep its
+	// browser processes alive.
+	fetcherMu sync.Mutex
+	fetcher   scrapemate.HTTPFetcher
 }
 
 // NewScrapemateApp creates a new ScrapemateApp.
@@ -83,8 +90,18 @@ func (app *ScrapemateApp) Start(ctx context.Context, seedJobs ...scrapemate.IJob
 	return g.Wait()
 }
 
-// Close closes the app.
+// Close closes the app, including the fetcher and its browsers. It may be
+// called while Start is still running (e.g. a run stuck past its time limit);
+// closing the browsers makes that run fail and return.
 func (app *ScrapemateApp) Close() error {
+	app.fetcherMu.Lock()
+	f := app.fetcher
+	app.fetcherMu.Unlock()
+
+	if f != nil {
+		_ = f.Close()
+	}
+
 	if app.cacher != nil {
 		app.cacher.Close()
 	}
@@ -105,8 +122,14 @@ func (app *ScrapemateApp) getMate(ctx context.Context) (*scrapemate.ScrapeMate, 
 		return nil, err
 	}
 
+	app.fetcherMu.Lock()
+	app.fetcher = fetcherInstance
+	app.fetcherMu.Unlock()
+
 	app.cacher, err = app.getCacher()
 	if err != nil {
+		_ = fetcherInstance.Close()
+
 		return nil, err
 	}
 
@@ -127,7 +150,14 @@ func (app *ScrapemateApp) getMate(ctx context.Context) (*scrapemate.ScrapeMate, 
 		params = append(params, scrapemate.WithInitJob(app.cfg.InitJob))
 	}
 
-	return scrapemate.New(params...)
+	mate, err := scrapemate.New(params...)
+	if err != nil {
+		_ = fetcherInstance.Close()
+
+		return nil, err
+	}
+
+	return mate, nil
 }
 
 func (app *ScrapemateApp) getCacher() (scrapemate.Cacher, error) {

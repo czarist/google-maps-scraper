@@ -805,7 +805,7 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 			continue
 		}
 
-		wait, detail := s.nextPause(i, sent, failed, skipped+unsubscribed)
+		wait, detail := s.nextPause(sent, failed, skipped+unsubscribed)
 		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped+unsubscribed, detail); err != nil {
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
@@ -860,18 +860,12 @@ func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignI
 	}
 }
 
-func (s *Service) nextPause(index, sent, failed, skipped int) (wait time.Duration, detail string) {
-	why := "before the next message"
-	wait = s.paceWait(intraBatchMinWait, intraBatchMaxWait)
-
-	if (index+1)%mailBatchSize == 0 {
-		why = "before the next batch"
-		wait = s.paceWait(batchGapMinWait, batchGapMaxWait)
-	}
+func (s *Service) nextPause(sent, failed, skipped int) (wait time.Duration, detail string) {
+	wait = s.paceWait(mailMinWait, mailMaxWait)
 
 	detail = fmt.Sprintf(
-		"Sent %d, failed %d, skipped %d. Waiting %s %s.",
-		sent, failed, skipped, wait.Round(time.Second), why,
+		"Sent %d, failed %d, skipped %d. Waiting %s before the next message.",
+		sent, failed, skipped, wait.Round(time.Second),
 	)
 
 	return wait, detail

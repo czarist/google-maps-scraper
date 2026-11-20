@@ -64,39 +64,16 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 		}
 	}
 
-	// 24 pauses: a short wait between messages, and the longer wait after each full 10.
+	// One short random pause between every two messages, with no batch gaps.
 	// Nothing waits after the last message.
-	wantWaits := make([]time.Duration, 0, n-1)
-	for i := 0; i < n-1; i++ {
-		if (i+1)%mailBatchSize == 0 {
-			wantWaits = append(wantWaits, batchGapMinWait)
-
-			continue
-		}
-
-		wantWaits = append(wantWaits, intraBatchMinWait)
-	}
-
-	if len(details) != len(wantWaits) {
-		t.Fatalf("pauses %d, want %d", len(details), len(wantWaits))
+	if len(details) != n-1 {
+		t.Fatalf("pauses %d, want %d", len(details), n-1)
 	}
 
 	for i, detail := range details {
-		want := "Waiting " + wantWaits[i].String()
+		want := "Waiting " + mailMinWait.String() + " before the next message"
 		if !strings.Contains(detail, want) {
 			t.Fatalf("pause %d detail %q, want %q", i, detail, want)
-		}
-
-		if (i+1)%mailBatchSize == 0 {
-			if !strings.Contains(detail, "before the next batch") {
-				t.Fatalf("pause %d should be a batch gap: %s", i, detail)
-			}
-
-			continue
-		}
-
-		if !strings.Contains(detail, "before the next message") {
-			t.Fatalf("pause %d should be inside the batch: %s", i, detail)
 		}
 	}
 

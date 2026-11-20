@@ -289,7 +289,7 @@ var ptBR = map[string]string{
 	"Every job is already in this campaign, or there are no jobs yet. Create a job and choose this campaign.": "Todas as tarefas já estão nesta campanha, ou ainda não há tarefas. Crie uma tarefa e escolha esta campanha.",
 	"Dispatch": "Envio",
 	"%d ready, %d already sent, %d jobs with no results file.": "%d prontos, %d já enviados, %d tarefas sem arquivo de resultados.",
-	"Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, 10 at a time, with a pause between messages and a longer pause between batches.": "Os endereços vêm da coluna de emails do CSV de cada tarefa. Cada execução envia para todos os endereços ainda não enviados, 10 por vez, com uma pausa entre mensagens e uma pausa maior entre lotes.",
+	"Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, one at a time, with a random 1 to 4 second pause between messages.": "Os endereços vêm da coluna de emails do CSV de cada tarefa. Cada execução envia para todos os endereços ainda não enviados, um por vez, com uma pausa aleatória de 1 a 4 segundos entre mensagens.",
 	"Send again to addresses that already received this campaign": "Enviar de novo para endereços que já receberam esta campanha",
 	"Only if they received it at least":                           "Só para quem recebeu há pelo menos",
 	"days ago":                                                    "dias",

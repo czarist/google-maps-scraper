@@ -46,15 +46,10 @@ const (
 	// DefaultResendAfter is the default wait before an address can get the same campaign again.
 	DefaultResendAfter = 4 * 24 * time.Hour
 
-	// mailBatchSize is how many messages go out before the longer pause.
-	mailBatchSize = 10
-	// intraBatchMinWait and intraBatchMaxWait are the pause between messages in one batch.
-	// 9 pauses averaging 20s spread a batch of 10 over about 3 minutes.
-	intraBatchMinWait = 12 * time.Second
-	intraBatchMaxWait = 28 * time.Second
-	// batchGapMinWait and batchGapMaxWait are the pause between batches (about one minute).
-	batchGapMinWait = 60 * time.Second
-	batchGapMaxWait = 75 * time.Second
+	// mailMinWait and mailMaxWait bound the random pause between two messages.
+	// There are no batches: every message waits a fresh random 1-4s.
+	mailMinWait = 1 * time.Second
+	mailMaxWait = 4 * time.Second
 )
 
 // ErrDispatchRunning is returned when a campaign already has a send in progress.

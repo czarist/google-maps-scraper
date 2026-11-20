@@ -458,10 +458,13 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 // stuckGrace is how long past its time limit a run may take to stop by itself.
 const stuckGrace = 2 * time.Minute
 
-// mateCloseTimeout bounds how long closing a job's browser may take.
+// mateCloseTimeout bounds how long closing a job's browser may take. The JS
+// fetcher bounds its own close (about 20s) and kills the Playwright driver and
+// its browsers when they hang, so this is only a last resort for the worker.
 const mateCloseTimeout = 30 * time.Second
 
-// closeMate closes the job's browser without letting a hung close block the worker.
+// closeMate closes the job's app, fetcher and browsers, also when the run is
+// still stuck in Start, without letting a hung close block the worker.
 func closeMate(m mateRunner) {
 	done := make(chan struct{})
 
