@@ -63,6 +63,8 @@
                 <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label">{{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
                 <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label">{{t "places found"}}</span></div>
                 <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label">{{t "places with email"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithPhone}}</span><span class="stat-label">{{t "places with phone"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithWhatsApp}}</span><span class="stat-label">{{t "places with WhatsApp"}}</span></div>
                 <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label">{{t "email addresses found"}}</span></div>
                 <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label">{{t "waiting to be sent"}}</span></div>
                 <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label">{{t "accepted by the SMTP server"}}</span></div>

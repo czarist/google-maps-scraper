@@ -138,3 +138,50 @@ func waitFor(t *testing.T, cond func() bool) {
 
 	t.Fatal("condition not met in time")
 }
+
+func TestFailedJobIsQueuedAgainAfterTheOthers(t *testing.T) {
+	repo := &memoryJobRepo{}
+	svc := web.NewService(repo, t.TempDir())
+	job := web.Job{
+		ID: "job-x", Name: "nothing", Date: time.Now().UTC(), Status: web.StatusPending,
+		Data: web.JobData{Keywords: []string{"x"}, Lang: "en", Depth: 1, MaxTime: time.Minute},
+	}
+
+	if err := svc.Create(context.Background(), &job); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := &runner.Config{DataFolder: t.TempDir(), Concurrency: 1}
+	w := &webrunner{svc: svc, cfg: cfg, jobCfg: cfg, setupMate: func(context.Context, io.Writer, *web.Job) (mateRunner, error) {
+		return fakeMate{}, nil
+	}}
+
+	// No places: the run fails, and the job goes back to the queue for a later try.
+	_ = w.scrapeJob(context.Background(), &job)
+
+	got, _ := svc.Get(context.Background(), job.ID)
+	if got.Status != web.StatusPending || got.Data.Run.Attempts != 1 || !got.Data.Run.RetryAfter.After(time.Now()) || !got.Data.Run.Retrying() {
+		t.Fatalf("after 1 failure: status %q, run %+v; want pending for a later retry", got.Status, got.Data.Run)
+	}
+}
+
+func TestRestartRequeuesJobsLeftRunning(t *testing.T) {
+	repo := &memoryJobRepo{}
+	svc := web.NewService(repo, t.TempDir())
+	job := web.Job{ID: "job-r", Name: "cut", Date: time.Now().UTC(), Status: web.StatusWorking}
+	job.Data.Run.Attempts = 1
+
+	if err := svc.Create(context.Background(), &job); err != nil {
+		t.Fatal(err)
+	}
+
+	n, err := svc.RequeueInterrupted(context.Background())
+	if err != nil || n != 1 {
+		t.Fatalf("requeued %d, %v", n, err)
+	}
+
+	got, _ := svc.Get(context.Background(), job.ID)
+	if got.Status != web.StatusPending || got.Data.Run.Attempts != 0 || got.Data.Run.Error != web.ErrMsgInterrupted {
+		t.Fatalf("got status %q run %+v", got.Status, got.Data.Run)
+	}
+}

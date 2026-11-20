@@ -110,29 +110,32 @@ type Entry struct {
 	// key are misspelled ("longtitude"); MarshalJSON also emits the correctly
 	// spelled "longitude" key, and UnmarshalJSON accepts either. The field
 	// name is kept for backwards compatibility with existing imports.
-	Longtitude          float64           `json:"longtitude"`
-	Status              string            `json:"status"`
-	Description         string            `json:"description"`
-	ReviewsLink         string            `json:"reviews_link"`
-	Thumbnail           string            `json:"thumbnail"`
-	Timezone            string            `json:"timezone"`
-	PriceRange          string            `json:"price_range"`
-	DataID              string            `json:"data_id"`
-	StreetViewURL       string            `json:"street_view_url"`
-	PlaceID             string            `json:"place_id"`
-	Images              []Image           `json:"images"`
-	Reservations        []LinkSource      `json:"reservations"`
-	OrderOnline         []LinkSource      `json:"order_online"`
-	Menu                LinkSource        `json:"menu"`
-	Owner               Owner             `json:"owner"`
-	CompleteAddress     Address           `json:"complete_address"`
-	CreditCardsAccepted []string          `json:"credit_cards_accepted"`
-	About               []About           `json:"about"`
-	UserReviews         []Review          `json:"user_reviews"`
-	UserReviewsExtended []Review          `json:"user_reviews_extended"`
-	Emails              []string          `json:"emails"`
-	WebsitePhones       []string          `json:"website_phones,omitempty"`
-	ReviewCollection    *ReviewCollection `json:"review_collection,omitempty"`
+	Longtitude          float64      `json:"longtitude"`
+	Status              string       `json:"status"`
+	Description         string       `json:"description"`
+	ReviewsLink         string       `json:"reviews_link"`
+	Thumbnail           string       `json:"thumbnail"`
+	Timezone            string       `json:"timezone"`
+	PriceRange          string       `json:"price_range"`
+	DataID              string       `json:"data_id"`
+	StreetViewURL       string       `json:"street_view_url"`
+	PlaceID             string       `json:"place_id"`
+	Images              []Image      `json:"images"`
+	Reservations        []LinkSource `json:"reservations"`
+	OrderOnline         []LinkSource `json:"order_online"`
+	Menu                LinkSource   `json:"menu"`
+	Owner               Owner        `json:"owner"`
+	CompleteAddress     Address      `json:"complete_address"`
+	CreditCardsAccepted []string     `json:"credit_cards_accepted"`
+	About               []About      `json:"about"`
+	UserReviews         []Review     `json:"user_reviews"`
+	UserReviewsExtended []Review     `json:"user_reviews_extended"`
+	Emails              []string     `json:"emails"`
+	WebsitePhones       []string     `json:"website_phones,omitempty"`
+	// WhatsApp holds the numbers the business website links to on WhatsApp
+	// (wa.me or api.whatsapp.com/send). They are also in WebsitePhones.
+	WhatsApp         []string          `json:"whatsapp,omitempty"`
+	ReviewCollection *ReviewCollection `json:"review_collection,omitempty"`
 }
 
 // entryAlias is used inside Marshal/UnmarshalJSON to avoid infinite recursion
@@ -273,6 +276,7 @@ func (e *Entry) CsvHeaders() []string {
 		"user_reviews_extended",
 		"emails",
 		"website_phones",
+		"whatsapp",
 		"review_collection",
 	}
 }
@@ -316,6 +320,7 @@ func (e *Entry) CsvRow() []string {
 		stringify(e.UserReviewsExtended),
 		stringSliceToString(e.Emails),
 		stringSliceToString(e.WebsitePhones),
+		stringSliceToString(e.WhatsApp),
 		stringify(e.ReviewCollection),
 	}
 }

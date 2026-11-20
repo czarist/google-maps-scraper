@@ -14,6 +14,8 @@
         <div><dt>{{t "Jobs"}}</dt><dd>{{len .Jobs}}</dd></div>
         <div><dt>{{t "Places"}}</dt><dd>{{.Places}}</dd></div>
         <div><dt>{{t "With email"}}</dt><dd>{{.WithEmail}}</dd></div>
+        <div><dt>{{t "With phone"}}</dt><dd>{{.WithPhone}}</dd></div>
+        <div><dt>WhatsApp</dt><dd>{{.WithWhatsApp}}</dd></div>
         {{if .CampaignID}}
         <div><dt>{{t "Emails sent"}}</dt><dd>{{.Sent}}</dd></div>
         {{if .Failed}}<div><dt>{{t "Failed"}}</dt><dd>{{.Failed}}</dd></div>{{end}}
@@ -67,14 +69,19 @@
                     {{end}}
                 </div>
                 {{else if eq .Status "pending"}}
+                {{if .Data.Run.Retrying}}
+                <p class="run-line run-muted">{{t "Try %d of %d, after the other jobs" .Data.Run.NextAttempt .Data.Run.MaxAttempts}}</p>
+                <p class="run-line run-muted">{{t "Last try: %s" (t .Data.Run.Error)}}</p>
+                {{else}}
                 <p class="run-line run-muted">{{if gt $.Running 0}}{{t "Waiting for a free slot"}}{{else}}{{t "Starting in a moment"}}{{end}}</p>
+                {{end}}
                 {{else if and (eq .Status "ok") .Data.Run.Started}}
                 <p class="run-line run-muted">{{if eq .Data.Run.Places 1}}{{t "%d place in %s" .Data.Run.Places .Data.Run.Took}}{{else}}{{t "%d places in %s" .Data.Run.Places .Data.Run.Took}}{{end}}</p>
                 {{else if and (eq .Status "failed") .Data.Run.Started}}
                 <p class="run-line run-muted">{{t "Stopped after %s" .Data.Run.Took}}{{if gt .Data.Run.Places 0}}, {{if eq .Data.Run.Places 1}}{{t "%d place saved" .Data.Run.Places}}{{else}}{{t "%d places saved" .Data.Run.Places}}{{end}}{{end}}</p>
                 {{end}}
                 {{if eq .Status "ok"}}
-                <p class="run-line run-muted">{{t "%d with email" .WithEmail}}</p>
+                <p class="run-line run-muted">{{t "%d with email" .WithEmail}} · {{t "%d with phone" .WithPhone}} · {{t "%d with WhatsApp" .WithWhatsApp}}</p>
                 {{end}}
                 {{if and (eq .Status "failed") .Data.Run.Error}}
                 <p class="run-line run-muted">{{t .Data.Run.Error}}</p>

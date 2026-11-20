@@ -49,3 +49,26 @@ func TestWebsitePhones(t *testing.T) {
 		t.Fatalf("got %v, want %v", got, want)
 	}
 }
+
+func TestWebsiteWhatsAppReadsOnlyWhatsAppLinks(t *testing.T) {
+	html := `<a href="https://wa.me/5551995453421?text=oi">Zap</a>
+		<a href="https://api.whatsapp.com/send?phone=5551988887777&text=x">Zap 2</a>
+		<a href="tel:+555130134545">Fixo</a>
+		<a href="https://wa.me/5551995453421">Zap again</a>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := websiteWhatsApp(doc)
+	if len(got) != 2 {
+		t.Fatalf("got %v, want the two WhatsApp numbers only", got)
+	}
+
+	for _, p := range got {
+		if strings.Contains(p, "3013") {
+			t.Fatalf("a tel: link counted as WhatsApp: %v", got)
+		}
+	}
+}

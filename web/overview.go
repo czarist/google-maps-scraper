@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -16,39 +17,43 @@ const noCampaignKey = "none"
 
 // JobGroup is one accordion on the home page: a campaign and its jobs.
 type JobGroup struct {
-	Key        string
-	CampaignID string
-	Name       string
-	MailReady  bool
-	LastStatus string
-	Jobs       []Job
-	Running    int
-	Queued     int
-	Done       int
-	Places     int
-	WithEmail  int
-	Sent       int
-	Failed     int
-	Open       bool
+	WithPhone    int
+	WithWhatsApp int
+	Key          string
+	CampaignID   string
+	Name         string
+	MailReady    bool
+	LastStatus   string
+	Jobs         []Job
+	Running      int
+	Queued       int
+	Done         int
+	Places       int
+	WithEmail    int
+	Sent         int
+	Failed       int
+	Open         bool
 }
 
 // CampaignStats collects every number known about a campaign.
 type CampaignStats struct {
-	Jobs        int
-	Running     int
-	Queued      int
-	Done        int
-	FailedJobs  int
-	Places      int
-	WithEmail   int
-	Addresses   int
-	Sent        int
-	SendFailed  int
-	LastSentAt  time.Time
-	Dispatches  int
-	LastStatus  string
-	MailLog     []MailLogEntry
-	FailedMails []MailLogEntry
+	WithPhone    int
+	WithWhatsApp int
+	Jobs         int
+	Running      int
+	Queued       int
+	Done         int
+	FailedJobs   int
+	Places       int
+	WithEmail    int
+	Addresses    int
+	Sent         int
+	SendFailed   int
+	LastSentAt   time.Time
+	Dispatches   int
+	LastStatus   string
+	MailLog      []MailLogEntry
+	FailedMails  []MailLogEntry
 }
 
 // LastSentLabel is the UTC time of the last send attempt.
@@ -67,6 +72,10 @@ type csvStats struct {
 	places    int
 	withEmail int
 	emails    int
+	// withPhone counts places with a phone, from Google Maps or the website.
+	withPhone int
+	// withWhatsApp counts places whose website links to a WhatsApp number.
+	withWhatsApp int
 }
 
 var csvStatsCache sync.Map // path -> csvStats
@@ -132,12 +141,23 @@ func countCSV(path string) (csvStats, error) {
 		return csvStats{}, err
 	}
 
-	emailCol := -1
+	emailCol, phoneCol, sitePhonesCol, whatsappCol := -1, -1, -1, -1
 
 	for i, h := range header {
-		if h == "emails" {
+		switch h {
+		case "emails":
 			emailCol = i
+		case "phone":
+			phoneCol = i
+		case "website_phones":
+			sitePhonesCol = i
+		case "whatsapp":
+			whatsappCol = i
 		}
+	}
+
+	has := func(row []string, col int) bool {
+		return col >= 0 && col < len(row) && strings.TrimSpace(row[col]) != ""
 	}
 
 	var stats csvStats
@@ -153,6 +173,14 @@ func countCSV(path string) (csvStats, error) {
 		}
 
 		stats.places++
+
+		if has(row, phoneCol) || has(row, sitePhonesCol) {
+			stats.withPhone++
+		}
+
+		if has(row, whatsappCol) {
+			stats.withWhatsApp++
+		}
 
 		if emailCol < 0 || emailCol >= len(row) {
 			continue
@@ -215,6 +243,8 @@ func (s *Service) ListJobGroups(ctx context.Context, newJobID string) (JobPage, 
 			final := j.Status == StatusOK || j.Status == StatusFailed
 			if stats, ok := s.jobCSVStatsCached(j.ID, final); ok {
 				j.WithEmail = stats.withEmail
+				j.WithPhone = stats.withPhone
+				j.WithWhatsApp = stats.withWhatsApp
 			}
 		}
 
@@ -234,6 +264,8 @@ func (s *Service) ListJobGroups(ctx context.Context, newJobID string) (JobPage, 
 		g.Jobs = append(g.Jobs, *j)
 		g.Places += j.Data.Run.Places
 		g.WithEmail += j.WithEmail
+		g.WithPhone += j.WithPhone
+		g.WithWhatsApp += j.WithWhatsApp
 
 		switch j.Status {
 		case StatusWorking:
@@ -325,6 +357,8 @@ func (s *Service) CampaignStats(ctx context.Context, campaignID string) (Campaig
 
 		if stats, ok := s.jobCSVStats(jobs[i].ID); ok {
 			st.WithEmail += stats.withEmail
+			st.WithPhone += stats.withPhone
+			st.WithWhatsApp += stats.withWhatsApp
 			st.Addresses += stats.emails
 		}
 	}
@@ -363,7 +397,7 @@ func (s *Service) CampaignStats(ctx context.Context, campaignID string) (Campaig
 }
 
 // JobTablePageSize is how many jobs one page of the home table shows.
-const JobTablePageSize = 20
+const JobTablePageSize = 10
 
 // ListJobTable returns one page of the home job table.
 // filter is "" for every job, noCampaignKey for jobs without a campaign, or a campaign id.
@@ -399,6 +433,11 @@ func (s *Service) ListJobTable(ctx context.Context, newJobID, filter string, pag
 
 		jobs = append(jobs, j)
 	}
+
+	// Running jobs always come first; the rest keep their order (newest first).
+	sort.SliceStable(jobs, func(a, b int) bool {
+		return jobs[a].Status == StatusWorking && jobs[b].Status != StatusWorking
+	})
 
 	for i := range all.Groups {
 		g := &all.Groups[i]

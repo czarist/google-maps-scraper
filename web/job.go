@@ -91,6 +91,9 @@ type Job struct {
 	CampaignName string
 	// WithEmail counts the places in the job's CSV that have an email. Display only.
 	WithEmail int
+	// WithPhone and WithWhatsApp count places with a phone and with a WhatsApp link. Display only.
+	WithPhone    int
+	WithWhatsApp int
 }
 
 func (j *Job) Validate() error {
@@ -141,6 +144,28 @@ type JobRun struct {
 	Places     int       `json:"places"`
 	// Error explains why a run failed, when it is known.
 	Error string `json:"error,omitempty"`
+	// Attempts counts the runs so far. A failed run is queued again until MaxJobAttempts.
+	Attempts int `json:"attempts,omitempty"`
+	// RetryAfter holds a failed job back from the queue until this time.
+	RetryAfter time.Time `json:"retry_after,omitzero"`
+}
+
+// MaxJobAttempts is how many times a job runs before it stays failed.
+const MaxJobAttempts = 3
+
+// Retrying reports whether the job failed before and is queued for another try.
+func (r JobRun) Retrying() bool {
+	return r.Attempts > 0 && r.Error != ""
+}
+
+// NextAttempt is the number of the coming try, for templates.
+func (r JobRun) NextAttempt() int {
+	return r.Attempts + 1
+}
+
+// MaxAttempts is MaxJobAttempts, for templates.
+func (r JobRun) MaxAttempts() int {
+	return MaxJobAttempts
 }
 
 // Started reports whether the job has begun running.

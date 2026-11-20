@@ -75,3 +75,27 @@ func TestBulkCreateMoveAndDelete(t *testing.T) {
 		t.Fatalf("deleted jobs still in campaign b: %d", len(inB))
 	}
 }
+
+func TestRunQueuePutsRetriesAfterNewJobs(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+
+	retry := web.Job{ID: "old-retry", Name: "r", Status: web.StatusPending, Date: time.Now().Add(-time.Hour)}
+	retry.Data.Run.Attempts = 1
+	fresh := web.Job{ID: "new", Name: "n", Status: web.StatusPending, Date: time.Now()}
+
+	for _, j := range []*web.Job{&retry, &fresh} {
+		if err := repo.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := repo.Select(ctx, web.SelectParams{Status: web.StatusPending, Limit: 10, OldestFirst: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 2 || got[0].ID != "new" || got[1].ID != "old-retry" {
+		t.Fatalf("queue order: %v, %v", got, err)
+	}
+}

@@ -48,7 +48,7 @@ Jobs and campaigns can be referred to by name or by id. Every answer has a next_
 
 // defaultResultColumns are the CSV columns returned unless all columns are asked for.
 var defaultResultColumns = []string{
-	"title", "category", "address", "phone", "website", "emails", "website_phones",
+	"title", "category", "address", "phone", "website", "emails", "website_phones", "whatsapp",
 	"review_rating", "review_count", "latitude", "longitude", "link",
 }
 
@@ -95,7 +95,7 @@ Example: {"name": "escolas poa", "searches": ["escolas porto alegre", "escolas c
 	mcp.AddTool(server, tool("get_job", "Get job", "Show a job's settings, status and progress.", readOnly("")), s.mcpGetJob)
 	mcp.AddTool(server, tool("list_jobs", "List jobs", "List jobs, newest first.", readOnly("")), s.mcpListJobs)
 	mcp.AddTool(server, tool("get_job_results", "Get job results",
-		"Read the places a job found. Use only_with_email=true to get only places that have an email. Use offset to page.",
+		"Read the places a job found. Filters: only_with_email, only_with_phone, only_with_whatsapp. Use offset to page.",
 		readOnly("")), s.mcpJobResults)
 	mcp.AddTool(server, tool("delete_job", "Delete job", "Delete a job and its results. Cannot be undone.", writes("", true)), s.mcpDeleteJob)
 
@@ -621,6 +621,8 @@ func pick(header, row, cols []string) map[string]string {
 type resultsInput struct {
 	Job           string `json:"job" jsonschema:"job name or id"`
 	OnlyWithEmail bool   `json:"only_with_email,omitempty" jsonschema:"return only places that have an email"`
+	OnlyWithPhone bool   `json:"only_with_phone,omitempty" jsonschema:"return only places that have a phone (Google Maps or website)"`
+	OnlyWhatsApp  bool   `json:"only_with_whatsapp,omitempty" jsonschema:"return only places whose website links to WhatsApp"`
 	Offset        int    `json:"offset,omitempty" jsonschema:"places to skip, for paging"`
 	Limit         int    `json:"limit,omitempty" jsonschema:"places to return, default 20, max 500"`
 	AllColumns    bool   `json:"all_columns,omitempty" jsonschema:"return every column (reviews, hours, etc.) instead of the main ones"`
@@ -653,10 +655,22 @@ func (s *Server) mcpJobResults(ctx context.Context, _ *mcp.CallToolRequest, in r
 	}
 
 	emailCol := index(res.header, "emails")
+	phoneCol, sitePhonesCol, whatsappCol := index(res.header, "phone"), index(res.header, "website_phones"), index(res.header, "whatsapp")
+	has := func(row []string, col int) bool {
+		return col >= 0 && col < len(row) && strings.TrimSpace(row[col]) != ""
+	}
 	matching := make([][]string, 0, len(res.rows))
 
 	for _, row := range res.rows {
-		if in.OnlyWithEmail && (emailCol < 0 || emailCol >= len(row) || strings.TrimSpace(row[emailCol]) == "") {
+		if in.OnlyWithEmail && !has(row, emailCol) {
+			continue
+		}
+
+		if in.OnlyWithPhone && !has(row, phoneCol) && !has(row, sitePhonesCol) {
+			continue
+		}
+
+		if in.OnlyWhatsApp && !has(row, whatsappCol) {
 			continue
 		}
 

@@ -219,12 +219,12 @@ func TestScrapeHighlightsTheNewJob(t *testing.T) {
 		t.Fatalf("scrape response must hold the job groups with the new job marked: %s", body)
 	}
 
-	// One page of 20; the new job is on it, and the pager shows the rest.
+	// One page of 10; the new job is on it, and the pager shows the rest.
 	if rows := strings.Count(body, "<tr") - strings.Count(body, "<thead>"); rows != JobTablePageSize {
 		t.Fatalf("got %d job rows, want %d", rows, JobTablePageSize)
 	}
 
-	if !strings.Contains(body, "1–20 of 21 jobs") || !strings.Contains(body, "Page 1 of 2") {
+	if !strings.Contains(body, "1–10 of 21 jobs") || !strings.Contains(body, "Page 1 of 3") {
 		t.Fatalf("pager missing: %s", body)
 	}
 }

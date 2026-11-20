@@ -185,7 +185,20 @@ func perJobConcurrency(cfg *runner.Config, workers int) int {
 // A job that finishes frees its slot for the next one right away.
 func (w *webrunner) work(ctx context.Context) error {
 	workers := jobWorkers(w.cfg)
-	log.Printf("web runner: up to %d jobs in parallel, %d browser pages each", workers, w.jobCfg.Concurrency)
+
+	perJob := w.cfg.Concurrency
+	if w.jobCfg != nil {
+		perJob = w.jobCfg.Concurrency
+	}
+
+	log.Printf("web runner: up to %d jobs in parallel, %d browser pages each", workers, perJob)
+
+	// Nothing can be running yet: jobs marked running were cut by a restart.
+	if n, err := w.svc.RequeueInterrupted(ctx); err != nil {
+		log.Printf("requeue interrupted jobs: %v", err)
+	} else if n > 0 {
+		log.Printf("requeued %d jobs interrupted by a restart", n)
+	}
 
 	var (
 		mu       sync.Mutex
@@ -222,6 +235,11 @@ func (w *webrunner) work(ctx context.Context) error {
 				}
 
 				job := jobs[i]
+
+				// A failed job waits a little before its next try.
+				if job.Data.Run.RetryAfter.After(time.Now()) {
+					continue
+				}
 
 				mu.Lock()
 				if _, running := inflight[job.ID]; running {
@@ -280,7 +298,7 @@ func (w *webrunner) runOne(ctx context.Context, job *web.Job) {
 		params["error"] = err.Error()
 
 		log.Printf("error scraping job %s: %v", job.ID, err)
-	} else {
+	} else if job.Status == web.StatusOK {
 		log.Printf("job %s scraped successfully", job.ID)
 	}
 
@@ -289,7 +307,7 @@ func (w *webrunner) runOne(ctx context.Context, job *web.Job) {
 
 func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	job.Status = web.StatusWorking
-	job.Data.Run = web.JobRun{StartedAt: time.Now().UTC()}
+	job.Data.Run = web.JobRun{StartedAt: time.Now().UTC(), Attempts: job.Data.Run.Attempts + 1}
 
 	w.svc.StartProgress(job.ID)
 
@@ -338,7 +356,7 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		return w.finishJob(ctx, job, web.StatusFailed, err)
 	}
 
-	defer mate.Close()
+	defer closeMate(mate)
 
 	var coords string
 	if hasCoordinates(job.Data.Lat, job.Data.Lon) {
@@ -393,7 +411,29 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 
 		go exitMonitor.Run(mateCtx)
 
-		err = mate.Start(mateCtx, seedJobs...)
+		// The browser normally stops at the time limit. If it hangs past it, the
+		// job is ended anyway so its slot goes to the next one.
+		started := make(chan error, 1)
+
+		go func() { started <- mate.Start(mateCtx, seedJobs...) }()
+
+		hardLimit := time.NewTimer(time.Duration(allowedSeconds)*time.Second + stuckGrace)
+		defer hardLimit.Stop()
+
+		select {
+		case err = <-started:
+		case <-hardLimit.C:
+			cancel()
+
+			log.Printf("job %s went past its time limit; stopping it", job.ID)
+
+			return w.finishJob(ctx, job, web.StatusFailed, errors.New(web.ErrMsgStuck))
+		case <-ctx.Done():
+			cancel()
+
+			return w.finishJob(ctx, job, web.StatusFailed, ctx.Err())
+		}
+
 		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 			cancel()
 
@@ -404,6 +444,29 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	}
 
 	return w.finishJob(ctx, job, web.StatusOK, nil)
+}
+
+// stuckGrace is how long past its time limit a run may take to stop by itself.
+const stuckGrace = 2 * time.Minute
+
+// mateCloseTimeout bounds how long closing a job's browser may take.
+const mateCloseTimeout = 30 * time.Second
+
+// closeMate closes the job's browser without letting a hung close block the worker.
+func closeMate(m mateRunner) {
+	done := make(chan struct{})
+
+	go func() {
+		_ = m.Close()
+
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(mateCloseTimeout):
+		log.Printf("closing a job browser took longer than %s; moving on", mateCloseTimeout)
+	}
 }
 
 // finishJob records how the run ended (status, end time and places found)
@@ -421,6 +484,13 @@ func (w *webrunner) finishJob(ctx context.Context, job *web.Job, status string, 
 		// Maps search with no places at all almost always means the search failed.
 		job.Status = web.StatusFailed
 		job.Data.Run.Error = noPlacesError
+	}
+
+	// A failed run goes to the end of the queue for another try, unless the
+	// server is shutting down (then the restart requeues it).
+	if job.Status == web.StatusFailed && ctx.Err() == nil && web.QueueRetry(job, time.Now().UTC()) {
+		log.Printf("job %s failed (attempt %d of %d), queued again: %s",
+			job.ID, job.Data.Run.Attempts, web.MaxJobAttempts, job.Data.Run.Error)
 	}
 
 	// The job context may already be canceled here; the result still needs saving.

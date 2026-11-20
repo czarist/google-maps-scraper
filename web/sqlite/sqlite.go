@@ -91,7 +91,8 @@ func (repo *repo) Select(ctx context.Context, params web.SelectParams) ([]web.Jo
 	}
 
 	if params.OldestFirst {
-		q += " ORDER BY created_at ASC, id ASC"
+		// The run queue: new jobs first, then retries of failed ones, oldest first.
+		q += " ORDER BY COALESCE(json_extract(data, '$.run.attempts'), 0) ASC, created_at ASC, id ASC"
 	} else {
 		q += " ORDER BY created_at DESC, id DESC"
 	}

@@ -89,6 +89,39 @@ func phoneFromDigits(digits string) (string, bool) {
 	return formatBRPhone(digits[:2], digits[2:])
 }
 
+// websiteWhatsApp collects the numbers a website links to on WhatsApp
+// (wa.me/<number> or api.whatsapp.com/send?phone=<number>).
+func websiteWhatsApp(doc *goquery.Document) []string {
+	seen := map[string]bool{}
+
+	var out []string
+
+	doc.Find("a[href]").Each(func(_ int, s *goquery.Selection) {
+		href, _ := s.Attr("href")
+		lower := strings.ToLower(href)
+
+		var raw string
+
+		switch {
+		case strings.Contains(lower, "wa.me/"):
+			raw = strings.SplitN(href[strings.Index(lower, "wa.me/")+len("wa.me/"):], "?", 2)[0]
+		case strings.Contains(lower, "whatsapp.com/send"):
+			if i := strings.Index(lower, "phone="); i >= 0 {
+				raw = strings.SplitN(href[i+len("phone="):], "&", 2)[0]
+			}
+		default:
+			return
+		}
+
+		if p, ok := phoneFromDigits(nonDigitRe.ReplaceAllString(raw, "")); ok && !seen[p] && len(out) < maxWebsitePhones {
+			seen[p] = true
+			out = append(out, p)
+		}
+	})
+
+	return out
+}
+
 // websitePhones collects phone numbers with area code from a website: tel: and
 // WhatsApp links first, then numbers written in the page text.
 func websitePhones(doc *goquery.Document) []string {

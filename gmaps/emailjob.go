@@ -100,6 +100,8 @@ func (j *EmailExtractJob) Process(ctx context.Context, resp *scrapemate.Response
 	}
 
 	j.Entry.Emails = emails
+	// WhatsApp first: websitePhones strips scripts from the document.
+	j.Entry.WhatsApp = websiteWhatsApp(doc)
 	j.Entry.WebsitePhones = websitePhones(doc)
 
 	return j.Entry, nil, nil

@@ -97,6 +97,8 @@ func TestScrapeJobWithNoPlacesFails(t *testing.T) {
 		Status: web.StatusPending,
 		Data:   web.JobData{Keywords: []string{"x"}, Lang: "en", Zoom: 15, Depth: 1, MaxTime: time.Minute},
 	}
+	// The last allowed attempt: a failure now stays failed.
+	job.Data.Run.Attempts = web.MaxJobAttempts - 1
 
 	if err := svc.Create(context.Background(), &job); err != nil {
 		t.Fatalf("create job: %v", err)
@@ -158,10 +160,23 @@ func (r *memoryJobRepo) Select(_ context.Context, params web.SelectParams) ([]we
 		}
 	}
 
-	// Sort by created_at DESC (Date)
+	// Sort by created_at DESC (Date), or like the run queue with OldestFirst:
+	// fewer attempts first, then oldest.
+	before := func(a, b web.Job) bool {
+		if params.OldestFirst {
+			if a.Data.Run.Attempts != b.Data.Run.Attempts {
+				return a.Data.Run.Attempts < b.Data.Run.Attempts
+			}
+
+			return a.Date.Before(b.Date)
+		}
+
+		return a.Date.After(b.Date) || (a.Date.Equal(b.Date) && a.ID > b.ID)
+	}
+
 	for i := 0; i < len(jobs); i++ {
 		for j := i + 1; j < len(jobs); j++ {
-			if jobs[i].Date.Before(jobs[j].Date) || (jobs[i].Date.Equal(jobs[j].Date) && jobs[i].ID < jobs[j].ID) {
+			if before(jobs[j], jobs[i]) {
 				jobs[i], jobs[j] = jobs[j], jobs[i]
 			}
 		}
