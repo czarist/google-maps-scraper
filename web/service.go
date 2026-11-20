@@ -20,6 +20,8 @@ type Service struct {
 
 	dispatchMu  sync.Mutex
 	dispatching map[string]struct{}
+	// dispatchCtl pauses running dispatches and hands them new SMTP settings.
+	dispatchCtl map[string]*dispatchControl
 
 	// dispatchSleep and dispatchWait replace the paced-send clock in tests.
 	dispatchSleep func(context.Context, time.Duration)

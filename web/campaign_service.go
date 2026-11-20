@@ -252,7 +252,15 @@ func (s *Service) SaveCampaignMail(ctx context.Context, id string, cfg *MailConf
 		}
 	}
 
-	return store.SaveMail(ctx, id, &normalized)
+	if err := store.SaveMail(ctx, id, &normalized); err != nil {
+		return err
+	}
+
+	// A send in progress (or paused) uses the new server, login and sender
+	// from its next message on.
+	s.mailSettingsChanged(id)
+
+	return nil
 }
 
 // CampaignMailForForm returns settings safe to render. The password is cleared.
@@ -458,6 +466,8 @@ type DispatchOptions struct {
 	ResendAfter time.Duration
 	// SkipFailed leaves out addresses whose last send failed.
 	SkipFailed bool
+	// OnlyFailed sends only to addresses whose last send failed.
+	OnlyFailed bool
 	// Quiet records nothing in the history when there is nothing to send.
 	Quiet bool
 }
@@ -466,6 +476,12 @@ type DispatchOptions struct {
 // addresses that got it at least resendAfter ago are sent again too.
 func (s *Service) StartDispatch(ctx context.Context, campaignID string, resend bool, resendAfter time.Duration, send MailSender) (DispatchResult, error) {
 	return s.startDispatch(ctx, campaignID, DispatchOptions{Resend: resend, ResendAfter: resendAfter}, send)
+}
+
+// RetryFailedDispatch queues again only the addresses whose last send failed
+// and sends them now, without reaching addresses not sent yet.
+func (s *Service) RetryFailedDispatch(ctx context.Context, campaignID string, send MailSender) (DispatchResult, error) {
+	return s.startDispatch(ctx, campaignID, DispatchOptions{OnlyFailed: true}, send)
 }
 
 func (s *Service) startDispatch(ctx context.Context, campaignID string, opts DispatchOptions, send MailSender) (DispatchResult, error) {
@@ -541,9 +557,22 @@ func (s *Service) startDispatch(ctx context.Context, campaignID string, opts Dis
 		}
 	}
 
+	if opts.OnlyFailed {
+		if recs, err = keepFailed(ctx, store, campaignID, recs); err != nil {
+			return DispatchResult{}, err
+		}
+
+		// Skips counted above are the addresses that never failed; they are not news here.
+		skipped = 0
+	}
+
 	msgs, renderFailed, err := prepareMessages(&cfg, recs)
 	if err != nil {
 		return DispatchResult{}, err
+	}
+
+	if len(msgs) == 0 && opts.OnlyFailed {
+		return DispatchResult{Detail: "No failed addresses to send again."}, nil
 	}
 
 	if len(msgs) == 0 && opts.Quiet {
@@ -746,6 +775,9 @@ func (s *Service) unlockDispatch(id string) {
 func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailConfig, msgs []renderedMail, skipped, missing, renderFailed int, send MailSender) {
 	defer s.unlockDispatch(campaignID)
 
+	ctl := s.openDispatchControl(campaignID)
+	defer s.closeDispatchControl(campaignID, ctl)
+
 	ctx := context.Background()
 
 	store, err := s.campaignStore()
@@ -762,6 +794,9 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 
 	for i := range msgs {
 		msg := &msgs[i]
+
+		s.dispatchCheckpoint(ctx, store, ctl, campaignID, dispatchID, cfg, sent, failed, skipped+unsubscribed)
+
 		sendErr := s.deliver(ctx, cfg, service, &OutgoingMail{To: msg.To, Subject: msg.Subject, Body: msg.Body}, send)
 
 		var optedOut ErrUnsubscribed
@@ -805,7 +840,7 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 			continue
 		}
 
-		wait, detail := s.nextPause(sent, failed, skipped+unsubscribed)
+		wait, detail := s.nextPause(i, sent, failed, skipped+unsubscribed)
 		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped+unsubscribed, detail); err != nil {
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
@@ -860,12 +895,20 @@ func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignI
 	}
 }
 
-func (s *Service) nextPause(sent, failed, skipped int) (wait time.Duration, detail string) {
+// nextPause is the wait after message index: a random 5-8s, or the fixed batch
+// gap after every mailBatchSize messages.
+func (s *Service) nextPause(index, sent, failed, skipped int) (wait time.Duration, detail string) {
+	why := "before the next message"
 	wait = s.paceWait(mailMinWait, mailMaxWait)
 
+	if (index+1)%mailBatchSize == 0 {
+		why = "before the next batch"
+		wait = mailBatchGap
+	}
+
 	detail = fmt.Sprintf(
-		"Sent %d, failed %d, skipped %d. Waiting %s before the next message.",
-		sent, failed, skipped, wait.Round(time.Second),
+		"Sent %d, failed %d, skipped %d. Waiting %s %s.",
+		sent, failed, skipped, wait.Round(time.Second), why,
 	)
 
 	return wait, detail

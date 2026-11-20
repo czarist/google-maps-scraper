@@ -58,7 +58,7 @@
             <div id="live-running">{{if .Running}}<div class="notice notice-success" role="status">{{if .RunningDetail}}{{t .RunningDetail}}{{else}}{{t "Sending now."}}{{end}}</div>{{end}}</div>
             <!-- Refreshes the live regions of this page in place; faster while emails are being sent. -->
             <div id="live-poller" hx-get="/campaigns/{{.Campaign.ID}}" hx-trigger="every {{if .Running}}3s{{else}}15s{{end}}"
-                 hx-select-oob="#live-running,#live-stats,#live-jobs,#live-dispatch-info,#live-dispatch-button,#live-history,#live-sends,#live-poller"
+                 hx-select-oob="#live-running,#live-stats,#live-jobs,#live-dispatch-info,#live-dispatch-button,#live-dispatch-controls,#live-history,#live-sends,#live-poller"
                  hx-swap="none"></div>
 
             <div class="stats-grid" id="live-stats" aria-label="{{t "Campaign numbers"}}">
@@ -221,6 +221,7 @@
                     <button type="button" class="btn-quiet" id="mail-preview">{{t "Preview"}}</button>
                     <button type="button" class="btn-quiet" id="mail-test">{{t "Send test"}}</button>
                 </div>
+                <p class="hint">{{t "Saving while emails are being sent (or paused) switches the running send to the new server, login, password and sender from the next email. Subject and body changes apply to the next send."}}</p>
                 <noscript><p class="hint">{{t "Upload, preview, and the connection test need JavaScript. You can still paste the message and save."}}</p></noscript>
             </form>
                 </div>
@@ -237,7 +238,7 @@
             <h2>{{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
-            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, one at a time, with a random 1 to 4 second pause between messages."}}</p>
+            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, with a random 5 to 8 second pause between messages and a 20 second pause after every 20."}}</p>
             </div>
             <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
                 <label class="check" for="resend">
@@ -253,9 +254,27 @@
                     <p class="hint">{{t "Applies only when sending again. 0 sends again to everyone."}}</p>
                 </div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Running}}{{t "Sending"}}{{else}}{{t "Send emails"}}{{end}}</button>
+                    <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Paused}}{{t "Paused"}}{{else if .Running}}{{t "Sending"}}{{else}}{{t "Send emails"}}{{end}}</button>
                 </div>
             </form>
+
+            <div id="live-dispatch-controls" class="submit-row dispatch-controls">
+                {{if .Paused}}
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/resume">
+                    <button type="submit" class="btn-primary">{{t "Resume sending"}}</button>
+                </form>
+                <p class="hint">{{t "Paused before the next email. Change the server, password or sender in the Email tab, save, then resume: the rest is sent with the new settings."}}</p>
+                {{else if .Running}}
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/pause">
+                    <button type="submit" class="btn-quiet">{{t "Pause sending"}}</button>
+                </form>
+                {{else if .Stats.SendFailed}}
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/failed">
+                    <button type="submit" class="btn-quiet">{{t "Send again to the %d failed addresses" .Stats.SendFailed}}</button>
+                </form>
+                <p class="hint">{{t "Queues again only the addresses whose last send failed. Addresses not sent yet are left for Send emails."}}</p>
+                {{end}}
+            </div>
 
             <form method="post" action="/campaigns/{{.Campaign.ID}}/auto" class="auto-dispatch">
                 <h3>{{t "Automatic sending"}} <span class="status {{if .Auto.Enabled}}status-ok{{else}}status-pending{{end}}">{{if .Auto.Enabled}}{{t "On"}}{{else}}{{t "Off"}}{{end}}</span></h3>
@@ -263,7 +282,7 @@
                     <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
                     <span>
                         {{t "Send automatically to new addresses"}}
-                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same 10-per-batch rhythm. Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send."}}</small>
+                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (5 to 8 seconds apart, 20 seconds after every 20). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send."}}</small>
                     </span>
                 </label>
                 <label class="check" for="auto_resend">

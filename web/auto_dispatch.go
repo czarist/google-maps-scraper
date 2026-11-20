@@ -149,6 +149,15 @@ func (s *Service) AutoDispatchOnce(ctx context.Context, send MailSender) {
 // dropFailed removes addresses whose last send failed, so an automatic send
 // does not retry a bad address every round. A manual send still retries them.
 func dropFailed(ctx context.Context, store CampaignStore, campaignID string, recs []Recipient) ([]Recipient, error) {
+	return filterFailed(ctx, store, campaignID, recs, false)
+}
+
+// keepFailed keeps only the addresses whose last send failed, once each.
+func keepFailed(ctx context.Context, store CampaignStore, campaignID string, recs []Recipient) ([]Recipient, error) {
+	return filterFailed(ctx, store, campaignID, recs, true)
+}
+
+func filterFailed(ctx context.Context, store CampaignStore, campaignID string, recs []Recipient, wantFailed bool) ([]Recipient, error) {
 	entries, err := store.MailLog(ctx, campaignID)
 	if err != nil {
 		return nil, err
@@ -162,16 +171,29 @@ func dropFailed(ctx context.Context, store CampaignStore, campaignID string, rec
 		}
 	}
 
-	if len(failed) == 0 {
+	if len(failed) == 0 && !wantFailed {
 		return recs, nil
 	}
 
 	kept := recs[:0:0]
+	seen := make(map[string]struct{})
 
 	for i := range recs {
-		if _, ok := failed[strings.ToLower(recs[i].Email)]; !ok {
-			kept = append(kept, recs[i])
+		email := strings.ToLower(recs[i].Email)
+
+		if _, ok := failed[email]; ok != wantFailed {
+			continue
 		}
+
+		if wantFailed {
+			if _, dup := seen[email]; dup {
+				continue
+			}
+
+			seen[email] = struct{}{}
+		}
+
+		kept = append(kept, recs[i])
 	}
 
 	return kept, nil

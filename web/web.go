@@ -89,6 +89,9 @@ func New(svc *Service, addr string) (*Server, error) {
 	mux.HandleFunc("/campaigns/{id}/mail/check", ans.campaignMailCheck)
 	mux.HandleFunc("/campaigns/{id}/mail/preview", ans.campaignMailPreview)
 	mux.HandleFunc("/campaigns/{id}/dispatch", ans.campaignDispatch)
+	mux.HandleFunc("/campaigns/{id}/dispatch/failed", ans.campaignDispatchFailed)
+	mux.HandleFunc("/campaigns/{id}/dispatch/pause", ans.campaignDispatchPause)
+	mux.HandleFunc("/campaigns/{id}/dispatch/resume", ans.campaignDispatchResume)
 	mux.HandleFunc("/campaigns/{id}/auto", ans.campaignAuto)
 	mux.HandleFunc("/campaigns/{id}/leads.csv", ans.campaignLeads)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {

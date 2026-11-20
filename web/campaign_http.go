@@ -38,6 +38,7 @@ type campaignView struct {
 	Notice         string
 	Error          string
 	Running        bool
+	Paused         bool
 	RunningDetail  string
 	PreviewWarning string
 	Auto           AutoDispatch
@@ -226,6 +227,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		Notice:         queryMessage(r, "notice"),
 		Error:          queryMessage(r, "error"),
 		Running:        running,
+		Paused:         running && s.svc.DispatchPaused(id),
 		PreviewWarning: warning,
 		Stats:          stats,
 	}
@@ -485,6 +487,32 @@ func (s *Server) campaignDispatch(w http.ResponseWriter, r *http.Request) {
 	}, "")
 }
 
+// campaignDispatchFailed sends again only to the addresses whose last send failed.
+func (s *Server) campaignDispatchFailed(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		result, err := s.svc.RetryFailedDispatch(r.Context(), id, s.sendMail)
+		if err != nil {
+			return err
+		}
+
+		if result.Started {
+			return errNotice("Failed addresses queued again. This page refreshes while they are sent.")
+		}
+
+		return errNotice(result.Detail)
+	}, "")
+}
+
+// campaignDispatchPause pauses the running dispatch before its next email.
+func (s *Server) campaignDispatchPause(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, s.svc.PauseDispatch, "Sending paused. You can change the email settings and resume.")
+}
+
+// campaignDispatchResume continues a paused dispatch with the saved settings.
+func (s *Server) campaignDispatchResume(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, s.svc.ResumeDispatch, "Sending resumed.")
+}
+
 // errNotice carries a success message out of postCampaign.
 type errNotice string
 
@@ -605,6 +633,8 @@ func publicErr(err error) string {
 		return "Job not found"
 	case errors.Is(err, ErrDispatchRunning):
 		return "A dispatch is already running for this campaign"
+	case errors.Is(err, ErrNoDispatch):
+		return "No dispatch is running for this campaign"
 	case errors.Is(err, ErrInvalidService):
 		return "The campaign service is missing or not registered"
 	case errors.Is(err, ErrServiceInUse):
