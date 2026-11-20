@@ -1010,7 +1010,8 @@ func securityHeaders(next http.Handler) http.Handler {
 				"worker-src 'self' blob:; "+
 				"style-src 'self' 'unsafe-inline' fonts.googleapis.com cdnjs.cloudflare.com; "+
 				"img-src 'self' data: cdn.redoc.ly cdnjs.cloudflare.com *.tile.openstreetmap.org; "+
-				"font-src 'self' fonts.gstatic.com; "+
+				// cdnjs serves the Font Awesome icon fonts.
+				"font-src 'self' fonts.gstatic.com cdnjs.cloudflare.com; "+
 				"connect-src 'self'")
 
 		next.ServeHTTP(w, r)
