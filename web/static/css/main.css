@@ -2730,3 +2730,76 @@ dialog.modal-wide .mail-preview-text {
         padding: 16px;
     }
 }
+
+/* Confirmation and status modal (gmsConfirm / gmsAlert in theme.js). */
+dialog.modal-sm {
+    width: min(460px, calc(100vw - 32px));
+}
+
+.gms-dialog-body {
+    display: flex;
+    align-items: flex-start;
+    gap: 16px;
+}
+
+.gms-dialog-icon {
+    flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    font-size: 1.25rem;
+    color: var(--water);
+    background: var(--water-tint);
+}
+
+.gms-dialog[data-kind="danger"] .gms-dialog-icon,
+.gms-dialog[data-kind="error"] .gms-dialog-icon {
+    color: var(--pin);
+    background: var(--pin-tint);
+}
+
+.gms-dialog[data-kind="success"] .gms-dialog-icon {
+    color: var(--ok);
+    background: var(--ok-tint);
+}
+
+.gms-dialog h2 {
+    margin: 2px 0 6px;
+    font-size: 1.15rem;
+}
+
+.gms-dialog p {
+    margin: 0;
+    color: var(--muted);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.gms-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 24px;
+}
+
+.gms-dialog-actions .btn-primary {
+    min-height: 40px;
+    padding: 8px 20px;
+    font-size: 0.9375rem;
+}
+
+/* Solid red button for the "yes, delete" answer. */
+.btn-danger.btn-danger-solid {
+    color: #fff;
+    background: var(--pin);
+    border-color: var(--pin);
+}
+
+.btn-danger.btn-danger-solid:hover {
+    background: var(--pin-ink);
+    border-color: var(--pin-ink);
+}

@@ -335,6 +335,8 @@ var ptBR = map[string]string{
 	"Skipped":                                                          "Ignorados",
 	"Detail":                                                           "Detalhe",
 	"No dispatches yet.":                                               "Nenhum envio ainda.",
+	"Create jobs":                                                      "Criar tarefas",
+	"Delete everything":                                                "Excluir tudo",
 	"Delete campaign":                                                  "Excluir campanha",
 	"Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed.": "Excluir esta campanha? As tarefas e seus CSVs ficam. As configurações de email e o histórico de envios desta campanha são removidos.",
 	"That HTML file is too long.":                   "Esse arquivo HTML é grande demais.",

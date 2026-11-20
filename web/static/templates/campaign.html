@@ -328,11 +328,11 @@
             <div class="danger-zone">
                 <h2><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "Delete campaign"}}</h2>
             <div class="campaign-delete">
-                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" data-confirm-ok="{{t "Delete campaign"}}" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
                     <button type="submit" class="btn-danger"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Delete campaign, keep jobs"}}</button>
                 </form>
                 {{if .Jobs}}
-                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign AND its %d jobs with their CSV files? Email settings and send history are removed too. This cannot be undone." (len .Jobs)}}">
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" data-confirm-ok="{{t "Delete everything"}}" hx-confirm="{{t "Delete this campaign AND its %d jobs with their CSV files? Email settings and send history are removed too. This cannot be undone." (len .Jobs)}}">
                     <input type="hidden" name="delete_jobs" value="1">
                     <button type="submit" class="btn-danger"><i class="fas fa-trash-can" aria-hidden="true"></i> {{t "Delete campaign and its %d jobs" (len .Jobs)}}</button>
                 </form>

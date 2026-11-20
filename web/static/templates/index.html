@@ -497,9 +497,9 @@ function hideSponsor() {
         var total = repeatCount();
         if (total > 1) {
             e.preventDefault();
-            if (window.confirm({{t "This creates {0} jobs, one per city. Continue?"}}.replace('{0}', total))) {
-                e.detail.issueRequest(true);
-            }
+            window.gmsConfirm({{t "This creates {0} jobs, one per city. Continue?"}}.replace('{0}', total), { okLabel: {{t "Create jobs"}} }).then(function (yes) {
+                if (yes) e.detail.issueRequest(true);
+            });
         }
     });
 
@@ -858,10 +858,12 @@ function hideSponsor() {
             var n = selectionCount();
             if (n === 0) return;
             var msg = {{t "Delete {0} jobs and their CSV files? This cannot be undone."}}.replace('{0}', n);
-            if (!window.confirm(msg)) return;
-            var values = bulkValues();
-            clearSelection();
-            htmx.ajax('POST', '/jobs/delete', { target: '#job-groups', swap: 'outerHTML', values: values });
+            window.gmsConfirm(msg, { danger: true, okLabel: {{t "Delete"}} }).then(function (yes) {
+                if (!yes) return;
+                var values = bulkValues();
+                clearSelection();
+                htmx.ajax('POST', '/jobs/delete', { target: '#job-groups', swap: 'outerHTML', values: values });
+            });
         } else if (e.target.closest('#bulk-move')) {
             var target = document.getElementById('bulk-target').value;
             if (!target || selectionCount() === 0) return;
