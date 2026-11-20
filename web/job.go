@@ -51,6 +51,8 @@ type JobPage struct {
 	Filter string
 	// Order is the job order of the list (see JobOrderNewest and friends).
 	Order string
+	// Status limits the list to one job status; "" shows every job.
+	Status string
 	// Selected is the filtered campaign's group, for its summary line.
 	Selected *JobGroup
 	// From and To are the 1-based positions of the first and last job shown.

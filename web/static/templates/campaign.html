@@ -94,6 +94,14 @@
                     <option value="failed" {{if eq .JobsOrder "failed"}}selected{{end}}>{{t "Failed first"}}</option>
                     <option value="working" {{if eq .JobsOrder "working"}}selected{{end}}>{{t "Running first"}}</option>
                 </select>
+                <label for="jobs_status"><i class="fas fa-filter" aria-hidden="true"></i> {{t "Status"}}</label>
+                <select id="jobs_status" name="jobs_status" onchange="this.form.submit()">
+                    <option value="" {{if eq .JobsStatus ""}}selected{{end}}>{{t "All statuses"}}</option>
+                    <option value="failed" {{if eq .JobsStatus "failed"}}selected{{end}}>{{t "Only failed"}}{{if .FailedJobs}} ({{.FailedJobs}}){{end}}</option>
+                    <option value="ok" {{if eq .JobsStatus "ok"}}selected{{end}}>{{t "Only completed"}}</option>
+                    <option value="working" {{if eq .JobsStatus "working"}}selected{{end}}>{{t "Only running"}}</option>
+                    <option value="pending" {{if eq .JobsStatus "pending"}}selected{{end}}>{{t "Only queued"}}</option>
+                </select>
                 <noscript><button type="submit" class="btn-quiet">{{t "Apply"}}</button></noscript>
             </form>
             <div id="live-jobs">
@@ -110,8 +118,15 @@
                         {{range .PagedJobs}}
                         <tr>
                             <td data-label="{{t "Job"}}">{{.Name}}</td>
-                            <td data-label="{{t "Status"}}"><span class="status status-{{.Status}}">{{if eq .Status "ok"}}{{t "Completed"}}{{else if eq .Status "pending"}}{{t "Queued"}}{{else if eq .Status "working"}}{{t "Running"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</span></td>
+                            <td data-label="{{t "Status"}}"><span class="status status-{{.Status}}">{{if eq .Status "ok"}}{{t "Completed"}}{{else if eq .Status "pending"}}{{t "Queued"}}{{else if eq .Status "working"}}{{t "Running"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</span>
+                                {{if and (eq .Status "failed") .Data.Run.Error}}<p class="run-line run-muted">{{t .Data.Run.Error}}</p>{{end}}</td>
                             <td class="actions">
+                                {{if eq .Status "failed"}}
+                                <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/retry">
+                                    <input type="hidden" name="job_id" value="{{.ID}}">
+                                    <button type="submit" class="btn-quiet"><i class="fas fa-rotate-right" aria-hidden="true"></i> {{t "Run again"}}</button>
+                                </form>
+                                {{end}}
                                 <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/remove">
                                     <input type="hidden" name="job_id" value="{{.ID}}">
                                     <button type="submit" class="btn-quiet"><i class="fas fa-xmark" aria-hidden="true"></i> {{t "Remove"}}</button>
@@ -119,7 +134,7 @@
                             </td>
                         </tr>
                         {{else}}
-                        <tr class="empty-row"><td colspan="3"><i class="fas fa-inbox" aria-hidden="true"></i> {{t "No jobs in this campaign yet."}}</td></tr>
+                        <tr class="empty-row"><td colspan="3"><i class="fas fa-inbox" aria-hidden="true"></i> {{if .JobsStatus}}{{t "No jobs with this status."}}{{else}}{{t "No jobs in this campaign yet."}}{{end}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>

@@ -38,8 +38,18 @@ func jobOrderBy(order string) string {
 
 // JobTablePage returns one page of the home table and how many jobs match the
 // filter, in the given order (running first by default). Only that page is decoded.
-func (repo *repo) JobTablePage(ctx context.Context, filter, order string, offset, limit int) ([]web.Job, int, error) {
+func (repo *repo) JobTablePage(ctx context.Context, filter, status, order string, offset, limit int) ([]web.Job, int, error) {
 	where, args := jobFilterWhere(filter)
+
+	if status != "" {
+		if where == "" {
+			where = ` WHERE j.status = ?`
+		} else {
+			where += ` AND j.status = ?`
+		}
+
+		args = append(args, status)
+	}
 
 	var total int
 	if err := repo.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM jobs j`+where, args...).Scan(&total); err != nil {

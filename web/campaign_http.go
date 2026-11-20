@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -57,6 +56,8 @@ type campaignView struct {
 	PagedJobs       []Job
 	JobsPager       Pager
 	JobsOrder       string
+	JobsStatus      string
+	FailedJobs      int
 	PagedDispatches []Dispatch
 	HistoryPager    Pager
 	PagedMailLog    []MailLogEntry
@@ -67,17 +68,18 @@ type campaignView struct {
 
 // Query parameters of the paged lists on the campaign page.
 const (
-	jobsPageParam  = "jobs_page"
-	jobsOrderParam = "jobs_sort"
-	histPageParam  = "hist_page"
-	mailPageParam  = "mail_page"
+	jobsPageParam   = "jobs_page"
+	jobsOrderParam  = "jobs_sort"
+	jobsStatusParam = "jobs_status"
+	histPageParam   = "hist_page"
+	mailPageParam   = "mail_page"
 )
 
 // pageCampaignView fills the paged lists of the campaign page from the request.
 func pageCampaignView(view *campaignView, r *http.Request) {
 	query := url.Values{}
 
-	for _, k := range []string{jobsPageParam, jobsOrderParam, histPageParam, mailPageParam} {
+	for _, k := range []string{jobsPageParam, jobsOrderParam, jobsStatusParam, histPageParam, mailPageParam} {
 		if v := strings.TrimSpace(r.URL.Query().Get(k)); v != "" {
 			query.Set(k, v)
 		}
@@ -87,9 +89,25 @@ func pageCampaignView(view *campaignView, r *http.Request) {
 		query.Del(jobsOrderParam)
 	}
 
-	view.JobsOrder = query.Get(jobsOrderParam)
+	if !ValidJobStatusFilter(query.Get(jobsStatusParam)) {
+		query.Del(jobsStatusParam)
+	}
 
-	jobs := slices.Clone(view.Jobs)
+	view.JobsOrder = query.Get(jobsOrderParam)
+	view.JobsStatus = query.Get(jobsStatusParam)
+
+	jobs := make([]Job, 0, len(view.Jobs))
+
+	for i := range view.Jobs {
+		if view.Jobs[i].Status == StatusFailed {
+			view.FailedJobs++
+		}
+
+		if matchesStatus(view.JobsStatus, view.Jobs[i].Status) {
+			jobs = append(jobs, view.Jobs[i])
+		}
+	}
+
 	sortJobsBy(jobs, view.JobsOrder)
 
 	var start, end int
@@ -103,7 +121,7 @@ func pageCampaignView(view *campaignView, r *http.Request) {
 	view.MailPager, start, end = newPager(query, mailPageParam, len(view.Stats.MailLog), ListPageSize, "history")
 	view.PagedMailLog = view.Stats.MailLog[start:end]
 
-	view.PageQuery = pageQuery(query, jobsPageParam, jobsOrderParam, histPageParam, mailPageParam)
+	view.PageQuery = pageQuery(query, jobsPageParam, jobsOrderParam, jobsStatusParam, histPageParam, mailPageParam)
 }
 
 func (s *Server) campaigns(w http.ResponseWriter, r *http.Request) {
@@ -433,6 +451,22 @@ func (s *Server) campaignUnassign(w http.ResponseWriter, r *http.Request) {
 
 		return s.svc.UnassignJob(r.Context(), id, jobID)
 	}, "Job removed from the campaign")
+}
+
+// campaignJobRetry queues a failed job of the campaign again. POST /campaigns/{id}/jobs/retry
+func (s *Server) campaignJobRetry(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(_ string) error {
+		if err := r.ParseForm(); err != nil {
+			return err
+		}
+
+		jobID, err := optionalCampaignID(r.Form.Get("job_id"))
+		if err != nil || jobID == "" {
+			return errors.New("invalid job")
+		}
+
+		return s.svc.RetryJob(r.Context(), jobID)
+	}, "Job queued again")
 }
 
 func (s *Server) campaignMail(w http.ResponseWriter, r *http.Request) {

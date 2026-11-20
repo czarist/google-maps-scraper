@@ -74,6 +74,11 @@ func New(svc *Service, addr string) (*Server, error) {
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
 	mux.HandleFunc("/jobs/delete", ans.deleteMany)
+	mux.HandleFunc("/jobs/retry", func(w http.ResponseWriter, r *http.Request) {
+		r = requestWithID(r)
+
+		ans.retryJob(w, r)
+	})
 	mux.HandleFunc("/jobs/campaign", ans.moveJobs)
 	mux.HandleFunc("/campaigns", ans.campaigns)
 	mux.HandleFunc("/campaigns/{id}", ans.campaign)
@@ -84,6 +89,7 @@ func New(svc *Service, addr string) (*Server, error) {
 	mux.HandleFunc("/campaigns/{id}/delete", ans.campaignDelete)
 	mux.HandleFunc("/campaigns/{id}/jobs", ans.campaignAssign)
 	mux.HandleFunc("/campaigns/{id}/jobs/remove", ans.campaignUnassign)
+	mux.HandleFunc("/campaigns/{id}/jobs/retry", ans.campaignJobRetry)
 	mux.HandleFunc("/campaigns/{id}/mail", ans.campaignMail)
 	mux.HandleFunc("/campaigns/{id}/mail/test", ans.campaignMailTest)
 	mux.HandleFunc("/campaigns/{id}/mail/check", ans.campaignMailCheck)
@@ -498,7 +504,7 @@ func (s *Server) renderJobGroups(r *http.Request, w io.Writer, newJobID string) 
 	page, _ := strconv.Atoi(r.FormValue("list_page"))
 
 	groups, err := s.svc.ListJobTable(r.Context(), newJobID, strings.TrimSpace(r.FormValue("list_campaign")),
-		strings.TrimSpace(r.FormValue("list_sort")), page)
+		strings.TrimSpace(r.FormValue("list_status")), strings.TrimSpace(r.FormValue("list_sort")), page)
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
@@ -597,7 +603,12 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 // with scope=filter, every job of the table filter list_campaign (all pages).
 func (s *Server) selectedJobIDs(r *http.Request) ([]string, error) {
 	if r.FormValue("scope") == "filter" {
-		return s.svc.JobIDsInFilter(r.Context(), strings.TrimSpace(r.FormValue("list_campaign")))
+		status := strings.TrimSpace(r.FormValue("list_status"))
+		if !ValidJobStatusFilter(status) {
+			return nil, errors.New("invalid status")
+		}
+
+		return s.svc.JobIDsInFilter(r.Context(), strings.TrimSpace(r.FormValue("list_campaign")), status)
 	}
 
 	var ids []string
@@ -618,6 +629,46 @@ func (s *Server) selectedJobIDs(r *http.Request) ([]string, error) {
 }
 
 // deleteMany deletes several jobs at once. POST /jobs/delete with ids=... or scope=filter.
+// retryJob queues a failed job again and redraws the job table. POST /jobs/retry?id=
+func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	id, ok := getIDFromRequest(r)
+	if !ok {
+		http.Error(w, "Invalid ID", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if err := s.svc.RetryJob(r.Context(), id.String()); err != nil {
+		code := http.StatusInternalServerError
+		if errors.Is(err, ErrJobNotFailed) {
+			code = http.StatusConflict
+		}
+
+		http.Error(w, trFrom(r, publicJobErr(err)), code)
+
+		return
+	}
+
+	if err := s.renderJobGroups(r, w, ""); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// publicJobErr is the message shown for a failed job action.
+func publicJobErr(err error) string {
+	if errors.Is(err, ErrJobNotFailed) {
+		return "Only failed jobs can be run again."
+	}
+
+	return "The job could not be queued again."
+}
+
 func (s *Server) deleteMany(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)

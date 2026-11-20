@@ -107,17 +107,20 @@ func (s *Service) DeleteMany(ctx context.Context, ids []string) error {
 }
 
 // JobIDsInFilter returns the ids of every job the home table shows for a filter:
-// "" for all, noCampaignKey for jobs without a campaign, or a campaign id.
-func (s *Service) JobIDsInFilter(ctx context.Context, filter string) ([]string, error) {
+// "" for all, noCampaignKey for jobs without a campaign, or a campaign id, and
+// only jobs with the given status when status is set.
+func (s *Service) JobIDsInFilter(ctx context.Context, filter, status string) ([]string, error) {
 	if store, ok := s.repo.(jobTableStore); ok {
 		all, err := store.JobSummaries(ctx, filter)
 		if err != nil {
 			return nil, err
 		}
 
-		ids := make([]string, len(all))
+		ids := make([]string, 0, len(all))
 		for i := range all {
-			ids[i] = all[i].ID
+			if matchesStatus(status, all[i].Status) {
+				ids = append(ids, all[i].ID)
+			}
 		}
 
 		return ids, nil
@@ -136,6 +139,10 @@ func (s *Service) JobIDsInFilter(ctx context.Context, filter string) ([]string, 
 		case filter == noCampaignKey && jobs[i].CampaignID == "":
 		case filter == jobs[i].CampaignID:
 		default:
+			continue
+		}
+
+		if !matchesStatus(status, jobs[i].Status) {
 			continue
 		}
 

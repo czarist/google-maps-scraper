@@ -404,21 +404,25 @@ const JobTablePageSize = 10
 // filter is "" for every job, noCampaignKey for jobs without a campaign, or a campaign id.
 // page starts at 1; a page past the end shows the last page.
 // When newJobID is set, the page that holds it is shown.
-func (s *Service) ListJobTable(ctx context.Context, newJobID, filter, order string, page int) (JobPage, error) {
+func (s *Service) ListJobTable(ctx context.Context, newJobID, filter, status, order string, page int) (JobPage, error) {
 	if !ValidJobOrder(order) {
 		order = JobOrderNewest
 	}
 
-	if store, ok := s.repo.(jobTableStore); ok {
-		return s.listJobTableSQL(ctx, store, newJobID, filter, order, page)
+	if !ValidJobStatusFilter(status) {
+		status = ""
 	}
 
-	return s.listJobTableInMemory(ctx, newJobID, filter, order, page)
+	if store, ok := s.repo.(jobTableStore); ok {
+		return s.listJobTableSQL(ctx, store, newJobID, filter, status, order, page)
+	}
+
+	return s.listJobTableInMemory(ctx, newJobID, filter, status, order, page)
 }
 
 // listJobTableInMemory builds the table from every job; used by repositories
 // without SQL paging (tests).
-func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, order string, page int) (JobPage, error) {
+func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, status, order string, page int) (JobPage, error) {
 	all, err := s.ListJobGroups(ctx, newJobID)
 	if err != nil {
 		return JobPage{}, err
@@ -439,6 +443,10 @@ func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, or
 		case filter == noCampaignKey && j.CampaignID == "":
 		case filter == j.CampaignID:
 		default:
+			continue
+		}
+
+		if !matchesStatus(status, j.Status) {
 			continue
 		}
 
@@ -483,6 +491,7 @@ func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, or
 	all.Total = total
 	all.Filter = filter
 	all.Order = order
+	all.Status = status
 	all.CurrentPage = page
 	all.TotalPages = pages
 	all.HasPages = pages > 1

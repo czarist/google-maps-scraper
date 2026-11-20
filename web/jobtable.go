@@ -16,19 +16,19 @@ type JobSummary struct {
 // jobTableStore pages and filters jobs in the database, so the home table and
 // its 3-second refresh stay fast with thousands of jobs.
 type jobTableStore interface {
-	JobTablePage(ctx context.Context, filter, order string, offset, limit int) ([]Job, int, error)
+	JobTablePage(ctx context.Context, filter, status, order string, offset, limit int) ([]Job, int, error)
 	JobSummaries(ctx context.Context, filter string) ([]JobSummary, error)
 	StatusCounts(ctx context.Context) (map[string]int, error)
 }
 
-func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJobID, filter, order string, page int) (JobPage, error) {
+func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJobID, filter, status, order string, page int) (JobPage, error) {
 	if newJobID != "" {
 		page = 1 // a new job is the newest one
 	}
 
 	page = max(page, 1)
 
-	jobs, total, err := store.JobTablePage(ctx, filter, order, (page-1)*JobTablePageSize, JobTablePageSize)
+	jobs, total, err := store.JobTablePage(ctx, filter, status, order, (page-1)*JobTablePageSize, JobTablePageSize)
 	if err != nil {
 		return JobPage{}, err
 	}
@@ -37,7 +37,7 @@ func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJ
 	if page > pages {
 		page = pages
 
-		if jobs, total, err = store.JobTablePage(ctx, filter, order, (page-1)*JobTablePageSize, JobTablePageSize); err != nil {
+		if jobs, total, err = store.JobTablePage(ctx, filter, status, order, (page-1)*JobTablePageSize, JobTablePageSize); err != nil {
 			return JobPage{}, err
 		}
 	}
@@ -62,6 +62,7 @@ func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJ
 		Total:       total,
 		Filter:      filter,
 		Order:       order,
+		Status:      status,
 		NewJobID:    newJobID,
 		RenderedAt:  time.Now().UTC(),
 		Running:     counts[StatusWorking],

@@ -253,6 +253,14 @@
                     <option value="failed">{{t "Failed first"}}</option>
                     <option value="working">{{t "Running first"}}</option>
                 </select>
+                <label for="list-state"><i class="fas fa-circle-half-stroke" aria-hidden="true"></i> {{t "Status"}}</label>
+                <select id="list-state" class="select-narrow">
+                    <option value="">{{t "All statuses"}}</option>
+                    <option value="failed">{{t "Only failed"}}</option>
+                    <option value="ok">{{t "Only completed"}}</option>
+                    <option value="working">{{t "Only running"}}</option>
+                    <option value="pending">{{t "Only queued"}}</option>
+                </select>
             </div>
             <div id="list-status" class="notice notice-success" role="status" aria-live="polite"></div>
             <div class="bulk-bar" id="bulk-bar" hidden>
@@ -722,26 +730,40 @@ function hideSponsor() {
         if (p.list_campaign === undefined) p.list_campaign = list.getAttribute('data-campaign') || '';
         if (p.list_page === undefined) p.list_page = list.getAttribute('data-page') || '1';
         if (p.list_sort === undefined) p.list_sort = list.getAttribute('data-sort') || '';
+        if (p.list_status === undefined) p.list_status = list.getAttribute('data-status') || '';
     });
 
+    // Campaign, status and order selects redraw the list from page 1. The new
+    // values are written on the list first, so every later refresh keeps them.
     var listFilter = document.getElementById('list-campaign');
-    if (listFilter) {
-        listFilter.addEventListener('change', function () {
+    var listSort = document.getElementById('list-sort');
+    var listState = document.getElementById('list-state');
+
+    function reloadJobList(resetSelection) {
+        if (resetSelection) {
             selectedJobs = {};
             allInFilter = false;
             refreshBulkBar();
-            var sortSel = document.getElementById('list-sort');
-            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter.value, list_page: '1', list_sort: sortSel ? sortSel.value : '' } });
-        });
+        }
+        var values = {
+            list_campaign: listFilter ? listFilter.value : '',
+            list_sort: listSort ? listSort.value : '',
+            list_status: listState ? listState.value : '',
+            list_page: '1'
+        };
+        var list = document.getElementById('job-groups');
+        if (list) {
+            list.setAttribute('data-campaign', values.list_campaign);
+            list.setAttribute('data-sort', values.list_sort);
+            list.setAttribute('data-status', values.list_status);
+            list.setAttribute('data-page', '1');
+        }
+        htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: values });
     }
 
-    // Order of the job list: travels with the filter like the page does.
-    var listSort = document.getElementById('list-sort');
-    if (listSort) {
-        listSort.addEventListener('change', function () {
-            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter ? listFilter.value : '', list_page: '1', list_sort: listSort.value } });
-        });
-    }
+    if (listFilter) listFilter.addEventListener('change', function () { reloadJobList(true); });
+    if (listState) listState.addEventListener('change', function () { reloadJobList(true); });
+    if (listSort) listSort.addEventListener('change', function () { reloadJobList(false); });
 
     // Selecting several jobs to delete at once. The list refreshes every few
     // seconds, so the selection lives here and is re-applied after each refresh.

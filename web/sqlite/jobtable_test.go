@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"testing"
 	"time"
@@ -39,7 +40,7 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 
 	start := time.Now()
 
-	page, err := svc.ListJobTable(ctx, "", "", "", 1)
+	page, err := svc.ListJobTable(ctx, "", "", "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +58,7 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 	}
 
 	// A page past the end shows the last one.
-	last, err := svc.ListJobTable(ctx, "", "camp", "", 999)
+	last, err := svc.ListJobTable(ctx, "", "camp", "", "", 999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,14 +67,73 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 		t.Fatalf("campaign filter: total %d page %d selected %+v", last.Total, last.CurrentPage, last.Selected)
 	}
 
-	none, err := svc.ListJobTable(ctx, "", "none", "", 1)
+	none, err := svc.ListJobTable(ctx, "", "none", "", "", 1)
 	if err != nil || none.Total != 4000 {
 		t.Fatalf("no-campaign filter: %d, %v", none.Total, err)
 	}
 
-	ids, err := svc.JobIDsInFilter(ctx, "camp")
+	ids, err := svc.JobIDsInFilter(ctx, "camp", "")
 	if err != nil || len(ids) != 1000 {
 		t.Fatalf("ids in filter: %d, %v", len(ids), err)
+	}
+}
+
+func TestJobTableOrderStatusFilterAndRetry(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	svc := web.NewService(repo, t.TempDir())
+
+	base := time.Now().Add(-time.Hour)
+	statuses := []string{web.StatusOK, web.StatusFailed, web.StatusOK, web.StatusPending, web.StatusFailed, web.StatusOK}
+	jobs := make([]web.Job, len(statuses))
+
+	for i, st := range statuses {
+		jobs[i] = web.Job{ID: fmt.Sprintf("job-%d", i), Name: "j", Status: st, Date: base.Add(time.Duration(i) * time.Minute)}
+		jobs[i].Data.Run.Attempts = web.MaxJobAttempts
+		jobs[i].Data.Run.Error = "boom"
+	}
+
+	if err := repo.CreateJobs(ctx, jobs, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	// Failed first: the two failed jobs (newest first), then the rest.
+	page, err := svc.ListJobTable(ctx, "", "", "", web.JobOrderFailed, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if page.Jobs[0].ID != "job-4" || page.Jobs[1].ID != "job-1" || page.Jobs[2].Status == web.StatusFailed {
+		t.Fatalf("failed first: %s, %s, %s", page.Jobs[0].ID, page.Jobs[1].ID, page.Jobs[2].Status)
+	}
+
+	// Only failed: nothing else, and the bulk "all of this view" ids agree.
+	only, err := svc.ListJobTable(ctx, "", "", web.StatusFailed, "", 1)
+	if err != nil || only.Total != 2 || len(only.Jobs) != 2 || only.Status != web.StatusFailed {
+		t.Fatalf("only failed: total %d rows %d status %q err %v", only.Total, len(only.Jobs), only.Status, err)
+	}
+
+	ids, err := svc.JobIDsInFilter(ctx, "", web.StatusFailed)
+	if err != nil || len(ids) != 2 {
+		t.Fatalf("failed ids: %v, %v", ids, err)
+	}
+
+	// Run again: back in the queue as a fresh run.
+	if err := svc.RetryJob(ctx, "job-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Get(ctx, "job-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != web.StatusPending || got.Data.Run.Attempts != 0 || got.Data.Run.Error != "" {
+		t.Fatalf("retried job: status %s attempts %d error %q", got.Status, got.Data.Run.Attempts, got.Data.Run.Error)
+	}
+
+	if err := svc.RetryJob(ctx, "job-0"); !errors.Is(err, web.ErrJobNotFailed) {
+		t.Fatalf("retry of a completed job: %v", err)
 	}
 }
 
