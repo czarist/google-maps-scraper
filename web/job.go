@@ -49,6 +49,8 @@ type JobPage struct {
 	NewJobID string
 	// Filter is the campaign the home table shows: "" for all, "none" for no campaign.
 	Filter string
+	// Order is the job order of the list (see JobOrderNewest and friends).
+	Order string
 	// Selected is the filtered campaign's group, for its summary line.
 	Selected *JobGroup
 	// From and To are the 1-based positions of the first and last job shown.

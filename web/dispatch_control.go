@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"time"
 )
 
 // ErrNoDispatch is returned when pausing or resuming a campaign that is not sending.
@@ -20,6 +21,36 @@ type dispatchControl struct {
 	resume chan struct{}
 	// reload asks the run to read the saved SMTP settings again.
 	reload bool
+	// nextSend is when the run sends its next message; zero while sending.
+	nextSend time.Time
+}
+
+func (c *dispatchControl) setNextSend(t time.Time) {
+	if c == nil {
+		return
+	}
+
+	c.mu.Lock()
+	c.nextSend = t
+	c.mu.Unlock()
+}
+
+// NextDispatchSend is when the campaign's running dispatch sends its next
+// email, for the countdown on the page. It is zero when nothing is waiting.
+func (s *Service) NextDispatchSend(campaignID string) time.Time {
+	ctl := s.dispatchControlFor(campaignID)
+	if ctl == nil {
+		return time.Time{}
+	}
+
+	ctl.mu.Lock()
+	defer ctl.mu.Unlock()
+
+	if ctl.paused {
+		return time.Time{}
+	}
+
+	return ctl.nextSend
 }
 
 // openDispatchControl registers the control of a run that is starting.

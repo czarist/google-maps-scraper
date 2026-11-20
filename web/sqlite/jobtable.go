@@ -19,9 +19,26 @@ func jobFilterWhere(filter string) (string, []any) {
 	}
 }
 
+// jobOrderBy is the ORDER BY for a job list order: the chosen status first,
+// then the newest. Only these constant strings reach the query.
+func jobOrderBy(order string) string {
+	const newest = ` j.created_at DESC, j.id DESC`
+
+	switch order {
+	case web.JobOrderOK:
+		return ` ORDER BY (j.status = 'ok') DESC,` + newest
+	case web.JobOrderFailed:
+		return ` ORDER BY (j.status = 'failed') DESC,` + newest
+	case web.JobOrderWorking:
+		return ` ORDER BY (j.status = 'working') DESC, (j.status = 'pending') DESC,` + newest
+	default:
+		return ` ORDER BY (j.status = 'working') DESC,` + newest
+	}
+}
+
 // JobTablePage returns one page of the home table and how many jobs match the
-// filter. Running jobs come first, then the newest. Only that page is decoded.
-func (repo *repo) JobTablePage(ctx context.Context, filter string, offset, limit int) ([]web.Job, int, error) {
+// filter, in the given order (running first by default). Only that page is decoded.
+func (repo *repo) JobTablePage(ctx context.Context, filter, order string, offset, limit int) ([]web.Job, int, error) {
 	where, args := jobFilterWhere(filter)
 
 	var total int
@@ -30,7 +47,7 @@ func (repo *repo) JobTablePage(ctx context.Context, filter string, offset, limit
 	}
 
 	q := `SELECT j.id, j.name, j.status, j.data, j.created_at, j.updated_at FROM jobs j` + where +
-		` ORDER BY (j.status = 'working') DESC, j.created_at DESC, j.id DESC LIMIT ? OFFSET ?`
+		jobOrderBy(order) + ` LIMIT ? OFFSET ?`
 
 	rows, err := repo.db.QueryContext(ctx, q, append(args, limit, offset)...)
 	if err != nil {

@@ -170,33 +170,51 @@ a {
 .topnav {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px 20px;
+    align-items: center;
+    gap: 6px 22px;
 }
 
+/* Header links: one line height, icon and text centered, color change on hover. */
 .topnav a {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    padding: 6px 2px;
+    gap: 8px;
+    min-height: 36px;
+    padding: 0 2px;
     color: var(--muted);
     font-weight: 600;
     font-size: 0.9375rem;
+    line-height: 1;
     text-decoration: none;
     border-radius: 4px;
+    transition: color 0.15s;
 }
 
-.topnav a:hover {
-    color: var(--ink);
-    text-decoration: underline;
-    text-underline-offset: 4px;
+.topnav a:hover,
+.topnav a:focus-visible {
+    color: var(--water);
+    text-decoration: none;
 }
 
 .topnav a[aria-current="page"] {
     color: var(--ink);
 }
 
+.topnav a[aria-current="page"]:hover {
+    color: var(--water);
+}
+
+.topnav .fas {
+    width: 1.1em;
+    text-align: center;
+}
+
 .theme-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-height: 36px;
     font: inherit;
+    line-height: 1;
     font-weight: 600;
     font-size: 0.9375rem;
     color: var(--muted);
@@ -986,15 +1004,17 @@ td time {
 
 /* Buttons wrap onto a second line instead of being cut off. */
 .actions > * {
-    margin: 3px 0 3px 6px;
+    margin: 4px 0 4px 8px;
 }
 
 .btn-quiet,
 .btn-danger {
     display: inline-flex;
     align-items: center;
-    min-height: 36px;
-    padding: 6px 12px;
+    justify-content: center;
+    gap: 8px;
+    min-height: 38px;
+    padding: 8px 14px;
     font-size: 0.875rem;
     font-weight: 600;
     border-radius: var(--radius-field);
@@ -2549,4 +2569,164 @@ summary .fas {
 .icon-button[data-tip]:focus-visible::after {
     opacity: 1;
     transform: translateY(0);
+}
+
+/* Live countdown to the next email in the "sending" notice. */
+.countdown {
+    margin-left: 6px;
+    white-space: nowrap;
+    opacity: 0.9;
+}
+
+.countdown strong {
+    display: inline-block;
+    min-width: 2.2ch;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Order select above a paged list on the campaign page. */
+.list-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 4px 0 14px;
+}
+
+.list-toolbar label {
+    margin: 0;
+    font-weight: 600;
+}
+
+.list-toolbar select {
+    width: auto;
+    min-width: 220px;
+    max-width: 100%;
+}
+
+.list-pager {
+    margin-bottom: 8px;
+}
+
+.btn-quiet.is-disabled {
+    color: var(--placeholder);
+    cursor: not-allowed;
+    opacity: 0.7;
+}
+
+.toolbar select.select-narrow {
+    min-width: 200px;
+}
+
+/* Email tab: the form uses the whole width, grouped in cards with fields side
+   by side; the preview opens in a modal. */
+.section-head {
+    margin-bottom: 20px;
+}
+
+.section-head h2 {
+    margin: 0 0 4px;
+}
+
+.lede-wide {
+    max-width: none;
+    margin-bottom: 0;
+}
+
+.mail-form {
+    gap: 24px;
+}
+
+.form-card {
+    padding: 20px 22px 22px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    background: var(--inset);
+}
+
+.form-card > legend {
+    float: left;
+    width: 100%;
+    margin: 0 0 16px;
+    font-size: 1.05rem;
+}
+
+.form-card > legend + * {
+    clear: both;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 18px 22px;
+    align-items: start;
+}
+
+.form-grid .span-2 {
+    grid-column: span 2;
+}
+
+.form-grid .span-all {
+    grid-column: 1 / -1;
+}
+
+.mail-form .hint {
+    margin: 2px 0 0;
+}
+
+.test-row {
+    display: flex;
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 12px 14px;
+}
+
+.test-row .field {
+    flex: 1 1 280px;
+}
+
+.test-row .btn-quiet {
+    min-height: 44px;
+}
+
+.mail-save-row {
+    gap: 12px 20px;
+}
+
+.mail-save-row .hint {
+    flex: 1 1 320px;
+    margin: 0;
+}
+
+dialog.modal-wide {
+    width: min(1040px, calc(100vw - 32px));
+}
+
+dialog.modal-wide .mail-preview {
+    min-height: 70vh;
+    margin-bottom: 0;
+}
+
+dialog.modal-wide .mail-preview-text {
+    margin-bottom: 0;
+}
+
+@media (max-width: 900px) {
+    .form-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .form-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .form-grid .span-2 {
+        grid-column: auto;
+    }
+
+    .form-card {
+        padding: 16px;
+    }
 }

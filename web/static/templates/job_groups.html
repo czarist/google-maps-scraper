@@ -1,6 +1,6 @@
 <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="every {{if .Active}}3s{{else}}10s{{end}} [!document.hidden]" hx-swap="outerHTML" hx-sync="this:drop"
      data-running="{{.Running}}" data-queued="{{.Queued}}" data-server-now="{{.RenderedAtISO}}"
-     data-campaign="{{.Filter}}" data-page="{{.CurrentPage}}" data-total="{{.Total}}">
+     data-campaign="{{.Filter}}" data-sort="{{.Order}}" data-page="{{.CurrentPage}}" data-total="{{.Total}}">
 {{with .Selected}}
 <div class="campaign-strip">
     <div class="campaign-strip-name">

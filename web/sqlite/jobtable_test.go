@@ -39,7 +39,7 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 
 	start := time.Now()
 
-	page, err := svc.ListJobTable(ctx, "", "", 1)
+	page, err := svc.ListJobTable(ctx, "", "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 	}
 
 	// A page past the end shows the last one.
-	last, err := svc.ListJobTable(ctx, "", "camp", 999)
+	last, err := svc.ListJobTable(ctx, "", "camp", "", 999)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +66,7 @@ func TestJobTableIsPagedInSQL(t *testing.T) {
 		t.Fatalf("campaign filter: total %d page %d selected %+v", last.Total, last.CurrentPage, last.Selected)
 	}
 
-	none, err := svc.ListJobTable(ctx, "", "none", 1)
+	none, err := svc.ListJobTable(ctx, "", "none", "", 1)
 	if err != nil || none.Total != 4000 {
 		t.Fatalf("no-campaign filter: %d, %v", none.Total, err)
 	}

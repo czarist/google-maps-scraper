@@ -437,6 +437,19 @@ func (s *Service) ListDispatches(ctx context.Context, campaignID string) ([]Disp
 	return store.ListDispatches(ctx, campaignID, 10)
 }
 
+// maxHistoryDispatches caps how many past runs the paged history can show.
+const maxHistoryDispatches = 1000
+
+// ListDispatchHistory returns the newest dispatch rows for the paged history.
+func (s *Service) ListDispatchHistory(ctx context.Context, campaignID string) ([]Dispatch, error) {
+	store, err := s.campaignStore()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.ListDispatches(ctx, campaignID, maxHistoryDispatches)
+}
+
 // DispatchRunning reports whether a send is still in progress.
 func (s *Service) DispatchRunning(ctx context.Context, campaignID string) (bool, error) {
 	store, err := s.campaignStore()
@@ -861,7 +874,9 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
 
+		ctl.setNextSend(time.Now().Add(wait))
 		s.paceSleep(ctx, wait)
+		ctl.setNextSend(time.Time{})
 	}
 
 	status := DispatchOK

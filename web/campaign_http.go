@@ -8,6 +8,8 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,23 +28,82 @@ type campaignsView struct {
 	Error     string
 }
 
+// waitingSentence is the "Waiting 8s before the next message." part of a
+// dispatch detail, replaced on the page by a live countdown.
+var waitingSentence = regexp.MustCompile(`\s*Waiting \S+ before the next (message|batch)\.`)
+
 type campaignView struct {
-	Campaign       Campaign
-	Services       []MailService
-	Mail           MailConfig
-	PasswordSet    bool
-	Jobs           []Job
-	Available      []Job
-	Dispatches     []Dispatch
-	Preview        DispatchPreview
-	Notice         string
-	Error          string
-	Running        bool
-	Paused         bool
-	RunningDetail  string
+	Campaign      Campaign
+	Services      []MailService
+	Mail          MailConfig
+	PasswordSet   bool
+	Jobs          []Job
+	Available     []Job
+	Dispatches    []Dispatch
+	Preview       DispatchPreview
+	Notice        string
+	Error         string
+	Running       bool
+	Paused        bool
+	RunningDetail string
+	// NextSendMS is how long until the next email, for the live countdown.
+	NextSendMS     int64
+	NextIsBatch    bool
 	PreviewWarning string
 	Auto           AutoDispatch
 	Stats          CampaignStats
+
+	// One page of each long list, 10 rows each, and their pagers.
+	PagedJobs       []Job
+	JobsPager       Pager
+	JobsOrder       string
+	PagedDispatches []Dispatch
+	HistoryPager    Pager
+	PagedMailLog    []MailLogEntry
+	MailPager       Pager
+	// PageQuery keeps the pages and order above in the live refresh.
+	PageQuery string
+}
+
+// Query parameters of the paged lists on the campaign page.
+const (
+	jobsPageParam  = "jobs_page"
+	jobsOrderParam = "jobs_sort"
+	histPageParam  = "hist_page"
+	mailPageParam  = "mail_page"
+)
+
+// pageCampaignView fills the paged lists of the campaign page from the request.
+func pageCampaignView(view *campaignView, r *http.Request) {
+	query := url.Values{}
+
+	for _, k := range []string{jobsPageParam, jobsOrderParam, histPageParam, mailPageParam} {
+		if v := strings.TrimSpace(r.URL.Query().Get(k)); v != "" {
+			query.Set(k, v)
+		}
+	}
+
+	if !ValidJobOrder(query.Get(jobsOrderParam)) {
+		query.Del(jobsOrderParam)
+	}
+
+	view.JobsOrder = query.Get(jobsOrderParam)
+
+	jobs := slices.Clone(view.Jobs)
+	sortJobsBy(jobs, view.JobsOrder)
+
+	var start, end int
+
+	view.JobsPager, start, end = newPager(query, jobsPageParam, len(jobs), ListPageSize, "jobs")
+	view.PagedJobs = jobs[start:end]
+
+	view.HistoryPager, start, end = newPager(query, histPageParam, len(view.Dispatches), ListPageSize, "history")
+	view.PagedDispatches = view.Dispatches[start:end]
+
+	view.MailPager, start, end = newPager(query, mailPageParam, len(view.Stats.MailLog), ListPageSize, "history")
+	view.PagedMailLog = view.Stats.MailLog[start:end]
+
+	view.PageQuery = pageQuery(query, jobsPageParam, jobsOrderParam, histPageParam, mailPageParam)
 }
 
 func (s *Server) campaigns(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +233,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		return view, err
 	}
 
-	dispatches, err := s.svc.ListDispatches(r.Context(), id)
+	dispatches, err := s.svc.ListDispatchHistory(r.Context(), id)
 	if err != nil {
 		return view, err
 	}
@@ -214,6 +275,19 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		runningDetail = dispatches[0].Detail
 	}
 
+	// While the run waits, the page counts down to the next email itself, so
+	// the fixed "Waiting 8s" sentence is dropped from the detail.
+	var (
+		nextSendMS  int64
+		nextIsBatch bool
+	)
+
+	if next := s.svc.NextDispatchSend(id); running && !next.IsZero() {
+		nextSendMS = max(time.Until(next).Milliseconds(), 0)
+		nextIsBatch = strings.Contains(runningDetail, "before the next batch")
+		runningDetail = waitingSentence.ReplaceAllString(runningDetail, "")
+	}
+
 	view = campaignView{
 		Campaign:       campaign,
 		Services:       services,
@@ -224,6 +298,8 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		Dispatches:     dispatches,
 		Preview:        preview,
 		RunningDetail:  runningDetail,
+		NextSendMS:     nextSendMS,
+		NextIsBatch:    nextIsBatch,
 		Notice:         queryMessage(r, "notice"),
 		Error:          queryMessage(r, "error"),
 		Running:        running,
@@ -235,6 +311,8 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 	if view.Auto, err = s.svc.GetAutoDispatch(r.Context(), id); err != nil {
 		log.Printf("auto dispatch setting %s: %v", id, err)
 	}
+
+	pageCampaignView(&view, r)
 
 	return view, nil
 }

@@ -246,6 +246,13 @@
                     {{end}}
                     <option value="none"{{if eq "none" .ListCampaign}} selected{{end}}>{{t "No campaign"}}</option>
                 </select>
+                <label for="list-sort"><i class="fas fa-arrow-down-wide-short" aria-hidden="true"></i> {{t "Order"}}</label>
+                <select id="list-sort" class="select-narrow">
+                    <option value="">{{t "Newest first"}}</option>
+                    <option value="ok">{{t "Completed first"}}</option>
+                    <option value="failed">{{t "Failed first"}}</option>
+                    <option value="working">{{t "Running first"}}</option>
+                </select>
             </div>
             <div id="list-status" class="notice notice-success" role="status" aria-live="polite"></div>
             <div class="bulk-bar" id="bulk-bar" hidden>
@@ -714,6 +721,7 @@ function hideSponsor() {
         var p = e.detail.parameters;
         if (p.list_campaign === undefined) p.list_campaign = list.getAttribute('data-campaign') || '';
         if (p.list_page === undefined) p.list_page = list.getAttribute('data-page') || '1';
+        if (p.list_sort === undefined) p.list_sort = list.getAttribute('data-sort') || '';
     });
 
     var listFilter = document.getElementById('list-campaign');
@@ -722,7 +730,16 @@ function hideSponsor() {
             selectedJobs = {};
             allInFilter = false;
             refreshBulkBar();
-            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter.value, list_page: '1' } });
+            var sortSel = document.getElementById('list-sort');
+            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter.value, list_page: '1', list_sort: sortSel ? sortSel.value : '' } });
+        });
+    }
+
+    // Order of the job list: travels with the filter like the page does.
+    var listSort = document.getElementById('list-sort');
+    if (listSort) {
+        listSort.addEventListener('change', function () {
+            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter ? listFilter.value : '', list_page: '1', list_sort: listSort.value } });
         });
     }
 

@@ -153,7 +153,7 @@ func templateFuncs(lang Lang) template.FuncMap {
 		},
 		"langSwitch": func() template.HTML {
 			return template.HTML(fmt.Sprintf( //nolint:gosec // only constant values are interpolated.
-				`<a href="?%s=%s" hreflang="%s" lang="%s">%s</a>`,
+				`<a href="?%s=%s" hreflang="%s" lang="%s"><i class="fas fa-language" aria-hidden="true"></i> %s</a>`,
 				langQueryParam, other, other, other, otherName,
 			))
 		},

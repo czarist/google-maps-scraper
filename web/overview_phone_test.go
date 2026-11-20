@@ -34,7 +34,7 @@ func TestJobTablePutsRunningJobsFirst(t *testing.T) {
 
 	srv := newTestServerWithRepo(t, &mockJobRepo{jobs: jobs})
 
-	page, err := srv.svc.ListJobTable(t.Context(), "", "", 1)
+	page, err := srv.svc.ListJobTable(t.Context(), "", "", "", 1)
 	if err != nil {
 		t.Fatal(err)
 	}

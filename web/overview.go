@@ -6,7 +6,6 @@ import (
 	"errors"
 	"io"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -405,17 +404,21 @@ const JobTablePageSize = 10
 // filter is "" for every job, noCampaignKey for jobs without a campaign, or a campaign id.
 // page starts at 1; a page past the end shows the last page.
 // When newJobID is set, the page that holds it is shown.
-func (s *Service) ListJobTable(ctx context.Context, newJobID, filter string, page int) (JobPage, error) {
-	if store, ok := s.repo.(jobTableStore); ok {
-		return s.listJobTableSQL(ctx, store, newJobID, filter, page)
+func (s *Service) ListJobTable(ctx context.Context, newJobID, filter, order string, page int) (JobPage, error) {
+	if !ValidJobOrder(order) {
+		order = JobOrderNewest
 	}
 
-	return s.listJobTableInMemory(ctx, newJobID, filter, page)
+	if store, ok := s.repo.(jobTableStore); ok {
+		return s.listJobTableSQL(ctx, store, newJobID, filter, order, page)
+	}
+
+	return s.listJobTableInMemory(ctx, newJobID, filter, order, page)
 }
 
 // listJobTableInMemory builds the table from every job; used by repositories
 // without SQL paging (tests).
-func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter string, page int) (JobPage, error) {
+func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, order string, page int) (JobPage, error) {
 	all, err := s.ListJobGroups(ctx, newJobID)
 	if err != nil {
 		return JobPage{}, err
@@ -450,10 +453,9 @@ func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter str
 		all.Groups[i].JobCount = len(all.Groups[i].Jobs)
 	}
 
-	// Running jobs always come first; the rest keep their order (newest first).
-	sort.SliceStable(jobs, func(a, b int) bool {
-		return jobs[a].Status == StatusWorking && jobs[b].Status != StatusWorking
-	})
+	// The chosen status comes first (running by default); the rest keep their
+	// order (newest first).
+	sortJobsBy(jobs, order)
 
 	for i := range all.Groups {
 		g := &all.Groups[i]
@@ -480,6 +482,7 @@ func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter str
 	all.Jobs = jobs[start:end]
 	all.Total = total
 	all.Filter = filter
+	all.Order = order
 	all.CurrentPage = page
 	all.TotalPages = pages
 	all.HasPages = pages > 1

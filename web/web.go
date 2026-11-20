@@ -497,7 +497,8 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 func (s *Server) renderJobGroups(r *http.Request, w io.Writer, newJobID string) error {
 	page, _ := strconv.Atoi(r.FormValue("list_page"))
 
-	groups, err := s.svc.ListJobTable(r.Context(), newJobID, strings.TrimSpace(r.FormValue("list_campaign")), page)
+	groups, err := s.svc.ListJobTable(r.Context(), newJobID, strings.TrimSpace(r.FormValue("list_campaign")),
+		strings.TrimSpace(r.FormValue("list_sort")), page)
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
