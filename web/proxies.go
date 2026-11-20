@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"os"
@@ -108,27 +109,126 @@ const proxyPreflightSample = 5
 // refuses a job without proxies, and it refuses any job whose proxies cannot
 // reach Google Maps (for example, the plan expired while the job was queued).
 func (s *Service) CheckJobProxies(ctx context.Context, proxies []string) error {
+	_, err := s.JobProxies(ctx, proxies)
+
+	return err
+}
+
+// JobProxies returns the proxies a job should run with: the given ones minus
+// those that failed a recent check. It tests a sample of the proxies whose health
+// is unknown or old, in parallel, and remembers the results, so a dead proxy
+// leaves the rotation for a while instead of failing request after request.
+// It returns ErrNoProxies when none works (or none is given and they are required).
+func (s *Service) JobProxies(ctx context.Context, proxies []string) ([]string, error) {
 	if len(proxies) == 0 {
 		if s.RequiresProxies() {
-			return ErrNoProxies
+			return nil, ErrNoProxies
 		}
 
-		return nil
+		return nil, nil
 	}
 
-	sample := proxies[:min(len(proxies), proxyPreflightSample)]
+	now := time.Now()
 
-	var lastErr string
+	var (
+		good, unknown []string
+		lastErr       string
+	)
+
+	for _, p := range proxies {
+		switch h, ok := proxyHealthOf(p, now); {
+		case !ok:
+			unknown = append(unknown, p)
+		case h.ok:
+			good = append(good, p)
+		default:
+			lastErr = h.err
+		}
+	}
+
+	// Test the unknown ones in a random order, a sample at a time.
+	rand.Shuffle(len(unknown), func(a, b int) { unknown[a], unknown[b] = unknown[b], unknown[a] })
+
+	sample := unknown[:min(len(unknown), proxyPreflightSample)]
+	untested := unknown[len(sample):]
+
+	testedOK := 0
 
 	for _, r := range TestProxies(ctx, sample) {
-		if r.OK {
-			return nil
-		}
+		proxyHealth.Store(r.Proxy, proxyHealthEntry{ok: r.OK, err: r.Error, at: now})
 
-		lastErr = r.Error
+		if r.OK {
+			good = append(good, r.Proxy)
+			testedOK++
+		} else {
+			lastErr = r.Error
+		}
 	}
 
-	return fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, len(sample), lastErr)
+	if len(good) == 0 {
+		return nil, fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, len(sample), lastErr)
+	}
+
+	// Proxies not tested yet stay in; the job's own requests will tell.
+	return append(good, untested...), nil
+}
+
+// proxyHealthEntry is the last check of one proxy.
+type proxyHealthEntry struct {
+	ok  bool
+	err string
+	at  time.Time
+}
+
+// proxyHealth remembers proxy checks: proxy URL -> proxyHealthEntry.
+var proxyHealth sync.Map
+
+const (
+	// proxyGoodFor is how long a working proxy is trusted without a new check.
+	proxyGoodFor = 10 * time.Minute
+	// proxyBadFor is how long a failing proxy stays out of the rotation.
+	proxyBadFor = 15 * time.Minute
+)
+
+// proxyHealthOf returns the remembered health of a proxy, if still fresh.
+func proxyHealthOf(p string, now time.Time) (proxyHealthEntry, bool) {
+	v, ok := proxyHealth.Load(p)
+	if !ok {
+		return proxyHealthEntry{}, false
+	}
+
+	h, _ := v.(proxyHealthEntry)
+
+	ttl := proxyGoodFor
+	if !h.ok {
+		ttl = proxyBadFor
+	}
+
+	if now.Sub(h.at) > ttl {
+		return proxyHealthEntry{}, false
+	}
+
+	return h, true
+}
+
+// ProxyHealthCounts reports how many proxies were seen working and failing in
+// their latest fresh check, for the dashboard.
+func ProxyHealthCounts() (good, bad int) {
+	now := time.Now()
+
+	proxyHealth.Range(func(k, _ any) bool {
+		if h, ok := proxyHealthOf(k.(string), now); ok {
+			if h.ok {
+				good++
+			} else {
+				bad++
+			}
+		}
+
+		return true
+	})
+
+	return good, bad
 }
 
 // ProxyScrapeStatus tests the ProxyScrape API key and reports what it gives access to.

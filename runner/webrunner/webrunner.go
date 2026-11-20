@@ -185,6 +185,7 @@ func perJobConcurrency(cfg *runner.Config, workers int) int {
 // A job that finishes frees its slot for the next one right away.
 func (w *webrunner) work(ctx context.Context) error {
 	workers := jobWorkers(w.cfg)
+	w.svc.SetWorkerSlots(workers)
 
 	perJob := w.cfg.Concurrency
 	if w.jobCfg != nil {
@@ -329,10 +330,18 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		proxies = w.cfg.Proxies
 	}
 
-	if err := w.svc.CheckJobProxies(ctx, proxies); err != nil {
+	healthy, err := w.svc.JobProxies(ctx, proxies)
+	if err != nil {
 		log.Printf("job %s not started: %v", job.ID, err)
 
 		return w.finishJob(ctx, job, web.StatusFailed, err)
+	}
+
+	// The browser gets only the proxies that are not known to be dead; the job
+	// keeps its full list for the next run.
+	mateJob := *job
+	if len(w.cfg.Proxies) == 0 && len(healthy) > 0 {
+		mateJob.Data.Proxies = healthy
 	}
 
 	outpath := filepath.Join(w.cfg.DataFolder, job.ID+".csv")
@@ -351,7 +360,7 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		setupMate = defaultSetupMate(w.cfg, w.mysqlDB, w.svc)
 	}
 
-	mate, err := setupMate(ctx, outfile, job)
+	mate, err := setupMate(ctx, outfile, &mateJob)
 	if err != nil {
 		return w.finishJob(ctx, job, web.StatusFailed, err)
 	}

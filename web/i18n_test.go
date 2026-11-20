@@ -76,7 +76,7 @@ func TestIndexRendersInPortuguese(t *testing.T) {
 		"en":    {`lang="en"`, "New job", "Create job", `"Give the job a name."`},
 	} {
 		rec := httptest.NewRecorder()
-		srv.srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?hl="+lang, http.NoBody))
+		srv.srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/tasks?hl="+lang, http.NoBody))
 
 		if rec.Code != http.StatusOK {
 			t.Fatalf("%s: status %d", lang, rec.Code)
@@ -107,5 +107,36 @@ func TestPTBRTranslatesDispatchProgress(t *testing.T) {
 		if got := translate(LangEN, in); got != in {
 			t.Errorf("English changed %q to %q", in, got)
 		}
+	}
+}
+
+func TestDashboardRendersInPortuguese(t *testing.T) {
+	srv, err := New(NewService(nil, t.TempDir()), ":0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/?hl=pt-BR", http.NoBody))
+
+	if body := rec.Body.String(); rec.Code != http.StatusOK || !strings.Contains(body, "Painel") || !strings.Contains(body, `hx-get="/dashboard/stats"`) {
+		t.Fatalf("dashboard page: %d", rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/dashboard/stats?hl=pt-BR", http.NoBody))
+
+	body := rec.Body.String()
+	for _, want := range []string{"Máquina", "Processador", "Memória", "Disco", "Raspador", "Email hoje", "Proxies"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("cards missing %q (status %d)", want, rec.Code)
+		}
+	}
+
+	rec = httptest.NewRecorder()
+	srv.srv.Handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/nope", http.NoBody))
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown path = %d, want 404", rec.Code)
 	}
 }

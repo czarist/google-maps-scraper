@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="{{lang}}">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{t "Dashboard"}} — Google Maps Scraper</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
+    <script src="/static/js/theme.js"></script>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <meta name="htmx-config" content='{"useTemplateFragments":true}'>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
+</head>
+<body hx-boost="true">
+    <a class="skip-link" href="#dash-title">{{t "Skip to the dashboard"}}</a>
+
+    <header class="topbar">
+        <div class="brand">
+            <svg class="brand-pin" width="22" height="28" viewBox="0 0 22 28" aria-hidden="true">
+                <path d="M11 0C4.9 0 0 4.8 0 10.8 0 18.9 11 28 11 28s11-9.1 11-17.2C22 4.8 17.1 0 11 0Z"/>
+                <circle cx="11" cy="10.5" r="4" fill="#fff"/>
+            </svg>
+            <span class="brand-name">Google Maps Scraper</span>
+        </div>
+        <nav class="topnav" aria-label="{{t "Sections"}}">
+            <a href="/" aria-current="page">{{t "Dashboard"}}</a>
+            <a href="/tasks">{{t "Jobs"}}</a>
+            <a href="/campaigns">{{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
+                <span class="theme-label-dark">{{t "Dark mode"}}</span>
+                <span class="theme-label-light">{{t "Light mode"}}</span>
+            </button>
+            {{langSwitch}}
+        </nav>
+    </header>
+
+    <main class="layout layout-single">
+        <section class="panel">
+            <div class="page-head">
+                <div>
+                    <h1 id="dash-title">{{t "Dashboard"}}</h1>
+                    <p class="lede">{{t "The machine, the scraper, proxies, email and backups at a glance. Refreshes every 5 seconds."}}</p>
+                </div>
+                <div class="page-actions">
+                    <a class="btn-quiet" href="/campaigns">{{t "Campaigns"}}</a>
+                    <a class="btn-primary" href="/tasks">{{t "Jobs"}}</a>
+                </div>
+            </div>
+        </section>
+
+        <div id="dash" class="dash" hx-get="/dashboard/stats" hx-trigger="load, every 5s [!document.hidden]" hx-swap="innerHTML" hx-sync="this:drop" aria-live="polite">
+            <p class="group-empty">{{t "Reading the system…"}}</p>
+        </div>
+    </main>
+</body>
+</html>

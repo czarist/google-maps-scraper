@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"log"
@@ -657,4 +658,71 @@ func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, name str
 	if _, err := buf.WriteTo(w); err != nil {
 		log.Printf("write %s: %v", name, err)
 	}
+}
+
+// campaignLeads downloads the campaign's businesses as one CSV, merged across
+// its jobs. GET /campaigns/{id}/leads.csv
+func (s *Server) campaignLeads(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	id, err := campaignIDFromRequest(r)
+	if err != nil {
+		http.Error(w, "invalid campaign", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	campaign, err := s.svc.GetCampaign(r.Context(), id)
+	if err != nil {
+		http.Error(w, publicErr(err), http.StatusNotFound)
+
+		return
+	}
+
+	leads, err := s.svc.CampaignLeads(r.Context(), id)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="`+leadsFileName(campaign.Name)+`"`)
+
+	// A byte order mark makes Excel read the accents as UTF-8.
+	_, _ = w.Write([]byte("\xEF\xBB\xBF"))
+
+	out := csv.NewWriter(w)
+	_ = out.Write(LeadCSVHeader)
+
+	for i := range leads {
+		_ = out.Write(leads[i].Row())
+	}
+
+	out.Flush()
+}
+
+// leadsFileName is a safe download name such as "leads-escolas-rs.csv".
+func leadsFileName(name string) string {
+	var b strings.Builder
+
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case b.Len() > 0 && !strings.HasSuffix(b.String(), "-"):
+			b.WriteRune('-')
+		}
+	}
+
+	slug := strings.Trim(b.String(), "-")
+	if slug == "" {
+		slug = "campanha"
+	}
+
+	return "leads-" + slug + ".csv"
 }

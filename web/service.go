@@ -28,6 +28,14 @@ type Service struct {
 	// proxyScrape supplies the default proxies when PROXYSCRAPE_API_KEY is set.
 	proxyScrape *ProxyScrape
 
+	// workerSlots is how many jobs the runner runs at once (dashboard only).
+	workerSlots atomic.Int64
+
+	// The dashboard caches its ProxyScrape numbers.
+	proxySummaryMu  sync.Mutex
+	proxySummaryAt  time.Time
+	proxySummaryVal ProxySummary
+
 	// optOut answers unsubscribe lookups. When nil, every send is refused.
 	optOut OptOutChecker
 	// unsubscribeBase is the page linked from every message.

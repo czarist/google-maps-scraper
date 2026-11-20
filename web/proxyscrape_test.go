@@ -142,3 +142,30 @@ func TestDefaultProxiesNoFallbackWhenAPIFails(t *testing.T) {
 		t.Fatalf("got %v, %v; want ErrNoProxies", got, err)
 	}
 }
+
+func TestDeadProxyLeavesTheRotation(t *testing.T) {
+	dead := "http://127.0.0.1:1"
+
+	if _, err := (&Service{}).JobProxies(context.Background(), []string{dead}); !errors.Is(err, ErrNoProxies) {
+		t.Fatalf("got %v, want ErrNoProxies", err)
+	}
+
+	h, ok := proxyHealthOf(dead, time.Now())
+	if !ok || h.ok {
+		t.Fatalf("dead proxy not remembered as bad: %+v %v", h, ok)
+	}
+
+	// Still out of the rotation without a new test, and not handed to the job.
+	start := time.Now()
+	if _, err := (&Service{}).JobProxies(context.Background(), []string{dead}); !errors.Is(err, ErrNoProxies) {
+		t.Fatalf("got %v, want ErrNoProxies", err)
+	}
+
+	if took := time.Since(start); took > 100*time.Millisecond {
+		t.Fatalf("a known-bad proxy was tested again (%s)", took)
+	}
+
+	if _, bad := ProxyHealthCounts(); bad < 1 {
+		t.Fatal("dashboard count misses the bad proxy")
+	}
+}

@@ -169,3 +169,24 @@ func (repo *repo) DeleteJobs(ctx context.Context, ids []string) error {
 
 	return nil
 }
+
+// ServiceSentEmails returns addresses that other campaigns of the same sending
+// service already got, sent after since (zero time: ever). The current campaign
+// is left out: its own log is checked separately.
+func (repo *repo) ServiceSentEmails(ctx context.Context, service, exceptCampaign string, since time.Time) (map[string]struct{}, error) {
+	var after int64
+	if !since.IsZero() {
+		after = since.UTC().Unix()
+	}
+
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT l.email FROM campaign_mail_log l
+		JOIN campaigns c ON c.id = l.campaign_id
+		WHERE c.servico = ? AND l.campaign_id != ? AND l.status = ? AND l.sent_at > ?
+	`, service, exceptCampaign, web.MailStatusSent, after)
+	if err != nil {
+		return nil, err
+	}
+
+	return scanEmails(rows)
+}

@@ -109,6 +109,20 @@ func (s *Service) DeleteMany(ctx context.Context, ids []string) error {
 // JobIDsInFilter returns the ids of every job the home table shows for a filter:
 // "" for all, noCampaignKey for jobs without a campaign, or a campaign id.
 func (s *Service) JobIDsInFilter(ctx context.Context, filter string) ([]string, error) {
+	if store, ok := s.repo.(jobTableStore); ok {
+		all, err := store.JobSummaries(ctx, filter)
+		if err != nil {
+			return nil, err
+		}
+
+		ids := make([]string, len(all))
+		for i := range all {
+			ids[i] = all[i].ID
+		}
+
+		return ids, nil
+	}
+
 	jobs, err := s.All(ctx)
 	if err != nil {
 		return nil, err
@@ -176,4 +190,44 @@ func (s *Service) MergeCampaignJobs(ctx context.Context, target string, sources 
 	}
 
 	return len(ids), nil
+}
+
+// serviceSentStore finds addresses reached by other campaigns of a sending service.
+type serviceSentStore interface {
+	ServiceSentEmails(ctx context.Context, service, exceptCampaign string, since time.Time) (map[string]struct{}, error)
+}
+
+// dropSentByService removes recipients that another campaign of the same service
+// already reached (after since, when set). It returns the rest and how many it removed.
+func dropSentByService(ctx context.Context, repo any, service, campaignID string, recs []Recipient, since *time.Time) ([]Recipient, int, error) {
+	store, ok := repo.(serviceSentStore)
+	if !ok || len(recs) == 0 {
+		return recs, 0, nil
+	}
+
+	var after time.Time
+	if since != nil {
+		after = *since
+	}
+
+	sent, err := store.ServiceSentEmails(ctx, service, campaignID, after)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	if len(sent) == 0 {
+		return recs, 0, nil
+	}
+
+	kept := make([]Recipient, 0, len(recs))
+
+	for i := range recs {
+		if _, done := sent[strings.ToLower(recs[i].Email)]; done {
+			continue
+		}
+
+		kept = append(kept, recs[i])
+	}
+
+	return kept, len(recs) - len(kept), nil
 }

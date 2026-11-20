@@ -2213,3 +2213,161 @@ dialog .service-new > button {
 .merge-list .check {
     margin-top: 8px;
 }
+
+/* ---------- Dashboard ---------- */
+
+.dash-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+}
+
+.dash-card {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dash-card h2 {
+    margin: 0;
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+}
+
+.dash-card .hint {
+    margin: 0;
+}
+
+.dash-wide {
+    grid-column: 1 / -1;
+}
+
+.dash-big {
+    margin: 0;
+    font-size: 2.25rem;
+    font-weight: 800;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+}
+
+.dash-big small {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--muted);
+    margin-left: 2px;
+}
+
+.dash-muted {
+    color: var(--muted);
+}
+
+.meter {
+    height: 8px;
+    border-radius: 999px;
+    background: var(--land-deep);
+    overflow: hidden;
+}
+
+.meter span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--ok);
+    transition: width 0.4s ease;
+}
+
+.meter-warn span {
+    background: var(--wait);
+}
+
+.meter-high span {
+    background: var(--pin);
+}
+
+.dash-facts {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px 24px;
+    margin: 0;
+}
+
+.dash-facts dt,
+.dash-stats dt {
+    font-size: 0.75rem;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.dash-facts dd {
+    margin: 2px 0 0;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.dash-stats {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0;
+}
+
+.dash-stats-2 {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dash-stats dd {
+    margin: 2px 0 0;
+    font-size: 1.5rem;
+    font-weight: 800;
+    font-variant-numeric: tabular-nums;
+}
+
+.dash-stats dd small {
+    font-size: 0.875rem;
+    color: var(--muted);
+}
+
+.dash-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    font-size: 0.875rem;
+}
+
+.dash-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+}
+
+.dash-card .btn-quiet {
+    align-self: flex-start;
+    margin-top: auto;
+}
+
+@media (max-width: 960px) {
+    .dash-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .dash-facts,
+    .dash-stats {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .dash-grid,
+    .dash-facts {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dash-stats {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}

@@ -25,7 +25,8 @@
             <span class="brand-name">Google Maps Scraper</span>
         </div>
         <nav class="topnav" aria-label="{{t "Sections"}}">
-            <a href="/">{{t "Jobs"}}</a>
+            <a href="/">{{t "Dashboard"}}</a>
+            <a href="/tasks">{{t "Jobs"}}</a>
             <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
             <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
@@ -46,7 +47,8 @@
                     <p class="lede">{{t "Service"}}: <code>{{.Campaign.ServiceName}}</code></p>
                 </div>
                 <div class="page-actions">
-                    <a class="btn-quiet" href="/?campaign={{.Campaign.ID}}">{{t "See jobs"}}</a>
+                    <a class="btn-quiet" href="/tasks?campaign={{.Campaign.ID}}">{{t "See jobs"}}</a>
+                    <a class="btn-quiet" href="/campaigns/{{.Campaign.ID}}/leads.csv" download hx-boost="false" title="{{t "One line per business, merged across the jobs, with phones, WhatsApp and emails"}}">{{t "Export leads (CSV)"}}</a>
                     <button type="button" class="btn-quiet" data-open-dialog="campaign-edit-dialog">{{t "Edit campaign"}}</button>
                 </div>
             </div>

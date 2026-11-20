@@ -526,6 +526,15 @@ func (s *Service) startDispatch(ctx context.Context, campaignID string, opts Dis
 		return DispatchResult{}, err
 	}
 
+	// An address that another campaign of the same service already reached is
+	// skipped too, so one business does not get the same pitch twice.
+	recs, sameService, err := dropSentByService(ctx, s.repo, service, campaignID, recs, since)
+	if err != nil {
+		return DispatchResult{}, err
+	}
+
+	skipped += sameService
+
 	if opts.SkipFailed {
 		if recs, err = dropFailed(ctx, store, campaignID, recs); err != nil {
 			return DispatchResult{}, err

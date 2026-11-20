@@ -3,6 +3,8 @@ package sqlite
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -97,5 +99,105 @@ func TestRunQueuePutsRetriesAfterNewJobs(t *testing.T) {
 
 	if len(got) != 2 || got[0].ID != "new" || got[1].ID != "old-retry" {
 		t.Fatalf("queue order: %v, %v", got, err)
+	}
+}
+
+func TestDispatchSkipsAddressesReachedBySameServiceCampaign(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	svc := web.NewService(repo, dir)
+	svc.SetOptOut(allowAll{}, "https://example.test/descadastro")
+
+	for _, id := range []string{"first", "camp"} {
+		if err := repo.CreateCampaign(ctx, &web.Campaign{ID: id, Name: id, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	createTestJob(t, repo, "job-1", time.Unix(10, 0))
+
+	if err := repo.AssignJob(ctx, "camp", "job-1"); err != nil {
+		t.Fatal(err)
+	}
+
+	csv := "title,emails\nCafe,\"a@cafe.test, b@cafe.test\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "job-1.csv"), []byte(csv), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// The other campaign of the same service already reached a@.
+	if err := repo.RecordMail(ctx, "first", "a@cafe.test", web.MailStatusSent, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := readyMail()
+	if err := svc.SaveCampaignMail(ctx, "camp", &cfg); err != nil {
+		t.Fatal(err)
+	}
+
+	var sent []string
+
+	sender := func(_ context.Context, _ *web.MailConfig, msg *web.OutgoingMail) error {
+		sent = append(sent, msg.To)
+
+		return nil
+	}
+
+	if _, err := svc.StartDispatch(ctx, "camp", false, web.DefaultResendAfter, sender); err != nil {
+		t.Fatal(err)
+	}
+
+	waitDispatch(t, repo, "camp")
+
+	if len(sent) != 1 || sent[0] != "b@cafe.test" {
+		t.Fatalf("sent %v, want only b@cafe.test", sent)
+	}
+}
+
+func TestCampaignLeadsMergesThePlaceFoundByTwoJobs(t *testing.T) {
+	repo := newTestRepo(t)
+	ctx := context.Background()
+	dir := t.TempDir()
+	svc := web.NewService(repo, dir)
+
+	if err := repo.CreateCampaign(ctx, &web.Campaign{ID: "camp", Name: "Camp", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+
+	head := "title,phone,emails,website_phones,whatsapp,place_id\n"
+	files := map[string]string{
+		"job-1": head + "Padaria A,(51) 3013-4545,a@x.com,,,P1\nPadaria B,(51) 99999-0000,,,,P2\n",
+		"job-2": head + "Padaria A,,a2@x.com,(51) 98888-1111,,P1\n",
+	}
+
+	for id, body := range files {
+		createTestJob(t, repo, id, time.Unix(10, 0))
+
+		if err := repo.AssignJob(ctx, "camp", id); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := os.WriteFile(filepath.Join(dir, id+".csv"), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	leads, err := svc.CampaignLeads(ctx, "camp")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(leads) != 2 {
+		t.Fatalf("got %d leads, want 2 (Padaria A merged)", len(leads))
+	}
+
+	a, b := leads[0], leads[1]
+	if a.Name != "Padaria A" || len(a.Emails) != 2 || a.Phone != "(51) 3013-4545" || len(a.ProbableWhatsApp) != 1 {
+		t.Fatalf("merged lead = %+v", a)
+	}
+
+	if len(b.ProbableWhatsApp) != 1 || b.ProbableWhatsApp[0] != "(51) 99999-0000" {
+		t.Fatalf("mobile not flagged: %+v", b)
 	}
 }

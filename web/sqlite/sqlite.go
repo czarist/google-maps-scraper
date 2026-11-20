@@ -280,6 +280,9 @@ func createSchema(db *sql.DB) error {
 
 		CREATE INDEX IF NOT EXISTS idx_jobs_created_at_id
 			ON jobs (created_at DESC, id DESC);
+
+		CREATE INDEX IF NOT EXISTS idx_jobs_status
+			ON jobs (status, created_at);
 	`)
 	if err != nil {
 		return err

@@ -90,13 +90,17 @@ func New(svc *Service, addr string) (*Server, error) {
 	mux.HandleFunc("/campaigns/{id}/mail/preview", ans.campaignMailPreview)
 	mux.HandleFunc("/campaigns/{id}/dispatch", ans.campaignDispatch)
 	mux.HandleFunc("/campaigns/{id}/auto", ans.campaignAuto)
+	mux.HandleFunc("/campaigns/{id}/leads.csv", ans.campaignLeads)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)
 
 		ans.viewJob(w, r)
 	})
 	mux.HandleFunc("/proxyscrape/status", ans.proxyScrapeStatus)
-	mux.HandleFunc("/", ans.index)
+	mux.HandleFunc("/tasks", ans.index)
+	mux.HandleFunc("/dashboard/stats", ans.dashboardStats)
+	mux.HandleFunc("/backup", ans.backupNow)
+	mux.HandleFunc("/", ans.home)
 	mux.Handle("/mcp", ans.mcpHandler())
 
 	// api routes
@@ -162,6 +166,8 @@ func New(svc *Service, addr string) (*Server, error) {
 		"static/templates/redoc.html",
 		"static/templates/campaigns.html",
 		"static/templates/campaign.html",
+		"static/templates/dashboard.html",
+		"static/templates/dashboard_cards.html",
 	}
 
 	for _, key := range tmplsKeys {
@@ -179,6 +185,9 @@ func New(svc *Service, addr string) (*Server, error) {
 func (s *Server) Start(ctx context.Context) error {
 	// Automatic sending: campaigns with it on get new addresses sent without a click.
 	go s.svc.RunAutoDispatch(ctx, s.sendMail, AutoDispatchInterval)
+
+	// Daily copy of the database (campaigns, SMTP settings, who got which email).
+	go s.svc.RunBackups(ctx)
 
 	go func(shutdownSource context.Context) {
 		<-shutdownSource.Done()
@@ -920,6 +929,59 @@ func (s *Server) proxyScrapeStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	renderJSON(w, code, st)
+}
+
+// home is the dashboard: machine, scraper, proxies, email and backups at a glance.
+// The numbers load right after the page, so it opens instantly.
+func (s *Server) home(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := s.execTemplate(w, r, "static/templates/dashboard.html", nil); err != nil {
+		log.Printf("render dashboard: %v", err)
+	}
+}
+
+// dashboardStats renders the dashboard cards; the page polls it every few seconds.
+func (s *Server) dashboardStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := s.execTemplate(w, r, "static/templates/dashboard_cards.html", s.svc.Dashboard(r.Context())); err != nil {
+		log.Printf("render dashboard cards: %v", err)
+	}
+}
+
+// backupNow makes a database backup right away and redraws the dashboard cards.
+func (s *Server) backupNow(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if _, err := s.svc.BackupNow(r.Context()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+
+		return
+	}
+
+	get := r.Clone(r.Context())
+	get.Method = http.MethodGet
+
+	s.dashboardStats(w, get)
 }
 
 func renderJSON(w http.ResponseWriter, code int, data any) {

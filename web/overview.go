@@ -17,6 +17,8 @@ const noCampaignKey = "none"
 
 // JobGroup is one accordion on the home page: a campaign and its jobs.
 type JobGroup struct {
+	// JobCount is how many jobs the group has (Jobs may hold only some of them).
+	JobCount     int
 	WithPhone    int
 	WithWhatsApp int
 	Key          string
@@ -404,6 +406,16 @@ const JobTablePageSize = 10
 // page starts at 1; a page past the end shows the last page.
 // When newJobID is set, the page that holds it is shown.
 func (s *Service) ListJobTable(ctx context.Context, newJobID, filter string, page int) (JobPage, error) {
+	if store, ok := s.repo.(jobTableStore); ok {
+		return s.listJobTableSQL(ctx, store, newJobID, filter, page)
+	}
+
+	return s.listJobTableInMemory(ctx, newJobID, filter, page)
+}
+
+// listJobTableInMemory builds the table from every job; used by repositories
+// without SQL paging (tests).
+func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter string, page int) (JobPage, error) {
 	all, err := s.ListJobGroups(ctx, newJobID)
 	if err != nil {
 		return JobPage{}, err
@@ -432,6 +444,10 @@ func (s *Service) ListJobTable(ctx context.Context, newJobID, filter string, pag
 		}
 
 		jobs = append(jobs, j)
+	}
+
+	for i := range all.Groups {
+		all.Groups[i].JobCount = len(all.Groups[i].Jobs)
 	}
 
 	// Running jobs always come first; the rest keep their order (newest first).

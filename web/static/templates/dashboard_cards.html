@@ -1,0 +1,111 @@
+<div class="dash-grid">
+    {{with .System}}
+    <section class="panel dash-card dash-wide" aria-labelledby="dash-machine">
+        <h2 id="dash-machine">{{t "Machine"}}</h2>
+        <dl class="dash-facts">
+            <div><dt>{{t "Processor"}}</dt><dd>{{if .CPUModel}}{{.CPUModel}}{{else}}—{{end}}</dd></div>
+            <div><dt>{{t "Cores / threads"}}</dt><dd>{{.CPUCores}} / {{.CPUThreads}}</dd></div>
+            <div><dt>{{t "System"}}</dt><dd>{{if .OS}}{{.OS}}{{else}}—{{end}}{{if .InContainer}} <span class="group-pill pill-muted">Docker</span>{{end}}</dd></div>
+            <div><dt>{{t "Kernel"}}</dt><dd>{{if .Kernel}}{{.Kernel}}{{else}}—{{end}}</dd></div>
+            <div><dt>{{t "Machine on for"}}</dt><dd>{{.HostUptimeLabel}}</dd></div>
+            <div><dt>{{t "Scraper on for"}}</dt><dd>{{.AppUptimeLabel}}</dd></div>
+        </dl>
+        {{if .InContainer}}<p class="hint">{{t "Running inside Docker: memory and disk are what Docker gives the container, which can be less than the PC has."}}</p>{{end}}
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-cpu">
+        <h2 id="dash-cpu">{{t "Processor"}}</h2>
+        <p class="dash-big">{{.CPUPct}}<small>%</small></p>
+        <div class="meter meter-{{.CPULevel}}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.CPUPct}}" aria-label="{{t "Processor use"}}"><span style="width: {{.CPUPct}}%"></span></div>
+        <p class="hint">{{t "Load (1, 5, 15 min)"}}: {{.LoadLabel}}</p>
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-mem">
+        <h2 id="dash-mem">{{t "Memory"}}</h2>
+        <p class="dash-big">{{.MemPct}}<small>%</small></p>
+        <div class="meter meter-{{.MemLevel}}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.MemPct}}" aria-label="{{t "Memory use"}}"><span style="width: {{.MemPct}}%"></span></div>
+        <p class="hint">{{.MemUsedLabel}} {{t "of"}} {{.MemTotalLabel}}{{if .SwapTotal}} · swap {{.SwapUsedLabel}} {{t "of"}} {{.SwapTotalLabel}}{{end}}</p>
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-disk">
+        <h2 id="dash-disk">{{t "Disk"}}</h2>
+        <p class="dash-big">{{.DiskPct}}<small>%</small></p>
+        <div class="meter meter-{{.DiskLevel}}" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.DiskPct}}" aria-label="{{t "Disk use"}}"><span style="width: {{.DiskPct}}%"></span></div>
+        <p class="hint">{{.DiskUsedLabel}} {{t "of"}} {{.DiskTotalLabel}} · <code>{{.DiskPath}}</code></p>
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-temp">
+        <h2 id="dash-temp">{{t "Temperature"}}</h2>
+        {{if .Temps}}
+        <p class="dash-big">{{.MaxTemp}}<small>°C</small></p>
+        <ul class="dash-list">
+            {{range .Temps}}<li><span>{{.Name}}</span><span>{{printf "%.0f" .Celsius}} °C</span></li>{{end}}
+        </ul>
+        {{else}}
+        <p class="dash-big dash-muted">—</p>
+        <p class="hint">{{t "Not available: the sensors are not visible from here (common inside Docker or a virtual machine)."}}</p>
+        {{end}}
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-browsers">
+        <h2 id="dash-browsers">{{t "Browsers"}}</h2>
+        <p class="dash-big">{{.Browsers}}</p>
+        <p class="hint">{{t "headless Chromium processes using %s" .BrowsersMemLabel}}</p>
+        <p class="hint">{{t "Scraper itself"}}: {{.AppMemLabel}} · {{.Goroutines}} goroutines · {{.GoVersion}}</p>
+    </section>
+    {{end}}
+
+    <section class="panel dash-card dash-wide" aria-labelledby="dash-scraper">
+        <h2 id="dash-scraper">{{t "Scraper"}}</h2>
+        <dl class="dash-stats">
+            <div><dt>{{t "Running"}}</dt><dd>{{.Running}}<small> / {{.Workers}}</small></dd></div>
+            <div><dt>{{t "Queued"}}</dt><dd>{{.Queued}}</dd></div>
+            <div><dt>{{t "Done today"}}</dt><dd>{{.Activity.JobsDone}}</dd></div>
+            <div><dt>{{t "Failed today"}}</dt><dd>{{.Activity.JobsFailed}}</dd></div>
+            <div><dt>{{t "Places today"}}</dt><dd>{{.Activity.PlacesFound}}</dd></div>
+            <div><dt>{{t "Average job"}}</dt><dd>{{if .Activity.AvgJobDuration}}{{.AvgJobLabel}}{{else}}—{{end}}</dd></div>
+        </dl>
+        <div class="meter meter-ok" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{.WorkerPct}}" aria-label="{{t "Busy job slots"}}"><span style="width: {{.WorkerPct}}%"></span></div>
+        <p class="hint">
+            {{if .QueueETA}}{{t "The queue should be empty in about %s." .QueueETALabel}}{{else if .Queued}}{{t "Estimate after the first jobs finish."}}{{else}}{{t "Nothing waiting."}}{{end}}
+            <a href="/tasks">{{t "See jobs"}}</a>
+        </p>
+    </section>
+
+    <section class="panel dash-card" aria-labelledby="dash-mail">
+        <h2 id="dash-mail">{{t "Email today"}}</h2>
+        <dl class="dash-stats dash-stats-2">
+            <div><dt>{{t "Sent"}}</dt><dd>{{.Activity.EmailsSent}}</dd></div>
+            <div><dt>{{t "Failed"}}</dt><dd>{{.Activity.EmailsFailed}}</dd></div>
+            <div><dt>{{t "Sending now"}}</dt><dd>{{.Activity.Dispatching}}</dd></div>
+            <div><dt>{{t "Automatic"}}</dt><dd>{{.Activity.AutoCampaigns}}</dd></div>
+        </dl>
+        <p class="hint"><a href="/campaigns">{{t "Campaigns"}}</a></p>
+    </section>
+
+    {{with .Proxies}}
+    <section class="panel dash-card" aria-labelledby="dash-proxy">
+        <h2 id="dash-proxy">{{t "Proxies"}}</h2>
+        {{if .Error}}
+        <p><span class="status status-failed">{{t "Unavailable"}}</span></p>
+        <p class="hint">{{.Error}}</p>
+        {{else}}
+        <p class="dash-big">{{.Available}}</p>
+        <p class="hint">{{if .ProxyScrape}}ProxyScrape{{if .Plans}} · {{.PlansLabel}}{{end}}{{else}}{{t "saved proxies"}}{{end}}</p>
+        {{end}}
+        <p class="hint">{{t "Last checks: %d working, %d out of the rotation" .Healthy .Bad}}</p>
+    </section>
+    {{end}}
+
+    <section class="panel dash-card" aria-labelledby="dash-backup">
+        <h2 id="dash-backup">{{t "Backup"}}</h2>
+        {{if .Backup.Enabled}}
+        <p class="dash-big">{{if .Backup.Last.IsZero}}—{{else}}{{.BackupAgeLabel}}{{end}}</p>
+        <p class="hint">{{if .Backup.Last.IsZero}}{{t "No backup yet."}}{{else}}{{t "since the last copy"}} · {{.Backup.Count}} {{t "kept"}} ({{.BackupSizeLabel}}){{end}}</p>
+        <p class="hint">{{t "One copy a day of campaigns, email settings and who got which email; the last 7 are kept."}}</p>
+        <button type="button" class="btn-quiet" hx-post="/backup" hx-target="#dash" hx-swap="innerHTML">{{t "Back up now"}}</button>
+        {{else}}
+        <p class="hint">{{t "Backups are not available for this database."}}</p>
+        {{end}}
+    </section>
+</div>
