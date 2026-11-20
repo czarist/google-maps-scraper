@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
@@ -25,13 +26,13 @@
             <span class="brand-name">Google Maps Scraper</span>
         </div>
         <nav class="topnav" aria-label="{{t "Sections"}}">
-            <a href="/">{{t "Dashboard"}}</a>
-            <a href="/tasks">{{t "Jobs"}}</a>
-            <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="/"><i class="fas fa-gauge-high" aria-hidden="true"></i> {{t "Dashboard"}}</a>
+            <a href="/tasks"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</a>
+            <a href="/campaigns" aria-current="page"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false"><i class="fas fa-book" aria-hidden="true"></i> {{t "API documentation"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
-                <span class="theme-label-dark">{{t "Dark mode"}}</span>
-                <span class="theme-label-light">{{t "Light mode"}}</span>
+                <span class="theme-label-dark"><i class="fas fa-moon" aria-hidden="true"></i> {{t "Dark mode"}}</span>
+                <span class="theme-label-light"><i class="fas fa-sun" aria-hidden="true"></i> {{t "Light mode"}}</span>
             </button>
             {{langSwitch}}
         </nav>
@@ -45,16 +46,16 @@
                     <h2 id="form-title">{{t "New campaign"}}</h2>
                     <p class="lede">{{t "A campaign groups jobs and keeps its own email settings."}}</p>
                 </div>
-                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
             </div>
 
             <form method="post" action="/campaigns">
                 <div class="field">
-                    <label for="campaign-name">{{t "Campaign name"}}</label>
+                    <label for="campaign-name"><i class="fas fa-tag" aria-hidden="true"></i> {{t "Campaign name"}}</label>
                     <input type="text" id="campaign-name" name="name" required maxlength="200" autocomplete="off" placeholder="{{t "Spring clinics"}}">
                 </div>
                 <div class="field">
-                    <label for="campaign-service">{{t "Service"}}</label>
+                    <label for="campaign-service"><i class="fas fa-server" aria-hidden="true"></i> {{t "Service"}}</label>
                     <select id="campaign-service" name="servico" required>
                         {{range .Services}}<option value="{{.Name}}"{{if eq .Name "trentin"}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
                     </select>
@@ -62,7 +63,7 @@
                 </div>
                 {{if .Campaigns}}
                 <fieldset class="merge-from">
-                    <legend>{{t "Take the jobs of these campaigns"}} <span class="optional">({{t "optional"}})</span></legend>
+                    <legend><i class="fas fa-right-to-bracket" aria-hidden="true"></i> {{t "Take the jobs of these campaigns"}} <span class="optional">({{t "optional"}})</span></legend>
                     <p class="hint">{{t "The jobs move to the new campaign. The old campaigns stay, with their email settings and history."}}</p>
                     <div class="merge-list">
                         {{range .Campaigns}}{{if .JobCount}}
@@ -75,7 +76,7 @@
                 </fieldset>
                 {{end}}
                 <div class="submit-row">
-                    <button type="submit" class="btn-primary">{{t "Create campaign"}}</button>
+                    <button type="submit" class="btn-primary"><i class="fas fa-plus" aria-hidden="true"></i> {{t "Create campaign"}}</button>
                 </div>
             </form>
         </section>
@@ -85,10 +86,10 @@
             <section class="panel" aria-labelledby="list-title">
                 <div class="page-head">
                     <div>
-                        <h1 id="list-title">{{t "Campaigns"}}</h1>
+                        <h1 id="list-title"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</h1>
                         <p class="lede">{{t "A campaign groups jobs and keeps its own email settings."}}</p>
                     </div>
-                    <button type="button" class="btn-primary" data-open-dialog="campaign-dialog">+ {{t "New campaign"}}</button>
+                    <button type="button" class="btn-primary" data-open-dialog="campaign-dialog"><i class="fas fa-plus" aria-hidden="true"></i> {{t "New campaign"}}</button>
                 </div>
 
                 {{if .Error}}<div class="notice notice-error" role="alert">{{t .Error}}</div>{{end}}
@@ -98,11 +99,11 @@
                     <table>
                         <thead>
                             <tr>
-                                <th scope="col">{{t "Campaign"}}</th>
-                                <th scope="col">{{t "Service"}}</th>
-                                <th scope="col">{{t "Jobs"}}</th>
-                                <th scope="col">{{t "Email"}}</th>
-                                <th scope="col">{{t "Last dispatch"}}</th>
+                                <th scope="col"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaign"}}</th>
+                                <th scope="col"><i class="fas fa-server" aria-hidden="true"></i> {{t "Service"}}</th>
+                                <th scope="col"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</th>
+                                <th scope="col"><i class="fas fa-at" aria-hidden="true"></i> {{t "Email"}}</th>
+                                <th scope="col"><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Last dispatch"}}</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -127,10 +128,10 @@
             <section class="panel" id="services" aria-labelledby="services-title">
                 <div class="page-head">
                     <div>
-                        <h2 id="services-title">{{t "Services"}}</h2>
+                        <h2 id="services-title"><i class="fas fa-server" aria-hidden="true"></i> {{t "Services"}}</h2>
                         <p class="hint">{{t "Each campaign sends as one service. Unsubscribes apply per service."}}</p>
                     </div>
-                    <button type="button" class="btn-quiet" data-open-dialog="service-dialog">+ {{t "New service"}}</button>
+                    <button type="button" class="btn-quiet" data-open-dialog="service-dialog"><i class="fas fa-plus" aria-hidden="true"></i> {{t "New service"}}</button>
                 </div>
                 <ul class="service-list">
                     {{range .Services}}
@@ -141,13 +142,13 @@
                     </div>
                     <form class="service-edit" method="post" action="/campaigns/services/{{.Name}}/update">
                         <input type="text" name="service_label" value="{{.Label}}" maxlength="120" aria-label="{{t "Label"}} {{.Name}}" required>
-                        <button type="submit" class="btn-quiet">{{t "Save"}}</button>
+                        <button type="submit" class="btn-quiet"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save"}}</button>
                     </form>
                     <div class="service-action">
                         {{if eq .Campaigns 0}}
                         <form method="post" action="/campaigns/services/{{.Name}}/delete"
                               hx-confirm="{{t `Delete the service "%s"? This cannot be undone.` .Label}}">
-                            <button type="submit" class="btn-danger">{{t "Delete"}}</button>
+                            <button type="submit" class="btn-danger"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Delete"}}</button>
                         </form>
                         {{else}}<span class="status status-ok">{{t "In use"}}</span>{{end}}
                     </div>
@@ -166,20 +167,20 @@
                             <h2 id="new-service-title">{{t "New service"}}</h2>
                             <p class="lede">{{t "Register a service that already exists on the unsubscribe site. The name is checked there and cannot be changed later."}}</p>
                         </div>
-                        <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                        <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                     </div>
                     <form class="service-new" method="post" action="/campaigns/services" aria-labelledby="new-service-title">
                         <div class="field">
-                            <label for="service-name">{{t "Service name"}}</label>
+                            <label for="service-name"><i class="fas fa-server" aria-hidden="true"></i> {{t "Service name"}}</label>
                             <input type="text" id="service-name" name="service_name" required maxlength="64" pattern="[a-z0-9_\-]+" autocomplete="off" spellcheck="false" placeholder="splitquota" aria-describedby="service-name-hint">
                             <p class="hint" id="service-name-hint">{{t "Same as servico_nome. Lowercase letters, digits, - and _."}}</p>
                         </div>
                         <div class="field">
-                            <label for="service-label">{{t "Label"}} <span class="optional">({{t "optional"}})</span></label>
+                            <label for="service-label"><i class="fas fa-tag" aria-hidden="true"></i> {{t "Label"}} <span class="optional">({{t "optional"}})</span></label>
                             <input type="text" id="service-label" name="service_label" maxlength="120" autocomplete="off" placeholder="Splitquota" aria-describedby="service-label-hint">
                             <p class="hint" id="service-label-hint">{{t "Shown in the campaign forms. Empty uses the name."}}</p>
                         </div>
-                        <button type="submit" class="btn-primary">{{t "Add service"}}</button>
+                        <button type="submit" class="btn-primary"><i class="fas fa-plus" aria-hidden="true"></i> {{t "Add service"}}</button>
                     </form>
                 </section>
             </dialog>

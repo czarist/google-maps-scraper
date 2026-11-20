@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <!-- htmx 1.x needs template fragments to swap table markup reliably. -->
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
@@ -26,13 +27,13 @@
             <span class="brand-name">Google Maps Scraper</span>
         </div>
         <nav class="topnav" aria-label="{{t "Sections"}}">
-            <a href="/">{{t "Dashboard"}}</a>
-            <a href="/tasks" aria-current="page">{{t "Jobs"}}</a>
-            <a href="/campaigns">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="/"><i class="fas fa-gauge-high" aria-hidden="true"></i> {{t "Dashboard"}}</a>
+            <a href="/tasks" aria-current="page"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</a>
+            <a href="/campaigns"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false"><i class="fas fa-book" aria-hidden="true"></i> {{t "API documentation"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
-                <span class="theme-label-dark">{{t "Dark mode"}}</span>
-                <span class="theme-label-light">{{t "Light mode"}}</span>
+                <span class="theme-label-dark"><i class="fas fa-moon" aria-hidden="true"></i> {{t "Dark mode"}}</span>
+                <span class="theme-label-light"><i class="fas fa-sun" aria-hidden="true"></i> {{t "Light mode"}}</span>
             </button>
             {{langSwitch}}
         </nav>
@@ -43,10 +44,10 @@
         <section class="panel panel-form">
             <div class="modal-head">
                 <div>
-                    <h2 id="form-title">{{t "New job"}}</h2>
+                    <h2 id="form-title"><i class="fas fa-magnifying-glass-location" aria-hidden="true"></i> {{t "New job"}}</h2>
                     <p class="lede">{{t "Each job searches Google Maps and builds a CSV of the businesses it finds."}}</p>
                 </div>
-                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
             </div>
 
             <form id="scrape-form"
@@ -58,7 +59,7 @@
                   novalidate>
 
                 <div class="field">
-                    <label for="name">{{t "Job name"}}</label>
+                    <label for="name"><i class="fas fa-tag" aria-hidden="true"></i> {{t "Job name"}}</label>
                     <input type="text" id="name" name="name" value="{{.Name}}"
                            autocomplete="off" required
                            placeholder="{{t "Coffee shops downtown"}}">
@@ -66,7 +67,7 @@
 
                 <div class="field">
                     <div class="field-head">
-                        <label for="keywords">{{t "Search queries"}}</label>
+                        <label for="keywords"><i class="fas fa-magnifying-glass" aria-hidden="true"></i> {{t "Search queries"}}</label>
                         <span class="query-count" id="query-count">{{t "0 queries"}}</span>
                     </div>
                     <p class="hint" id="keywords-hint">{{t "Each line is a separate Google Maps search. Write what you are looking for and where."}}</p>
@@ -85,7 +86,7 @@
                 </div>
 
                 <div class="field">
-                    <label for="repeat_cities">{{t "Repeat the search in other cities"}}</label>
+                    <label for="repeat_cities"><i class="fas fa-city" aria-hidden="true"></i> {{t "Repeat the search in other cities"}}</label>
                     <div class="repeat-row">
                         <select id="repeat_cities" name="repeat_cities" aria-describedby="repeat-hint">
                             <option value="" data-count="1">{{t "Don't repeat"}}</option>
@@ -104,7 +105,7 @@
 
                 <div class="form-row">
                 <div class="field field-narrow">
-                    <label for="lang">{{t "Results language"}}</label>
+                    <label for="lang"><i class="fas fa-language" aria-hidden="true"></i> {{t "Results language"}}</label>
                     <input type="text" id="lang" name="lang" value="{{.Language}}"
                            list="lang-options" maxlength="2" required
                            autocomplete="off" aria-describedby="lang-hint">
@@ -118,7 +119,7 @@
                 </div>
 
                 <div class="field">
-                    <label for="campaign_id">{{t "Campaign"}}</label>
+                    <label for="campaign_id"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaign"}}</label>
                     <select id="campaign_id" name="campaign_id">
                         <option value="">{{t "No campaign"}}</option>
                         {{range .Campaigns}}
@@ -131,29 +132,29 @@
 
                 <details class="advanced" id="advanced">
                     <summary>
-                        <span>{{t "Advanced settings"}}</span>
+                        <span><i class="fas fa-sliders" aria-hidden="true"></i> {{t "Advanced settings"}}</span>
                         <span class="advanced-state" id="advanced-state">{{t "Defaults"}}</span>
                     </summary>
 
                     <div class="advanced-body">
                         <fieldset>
-                            <legend>{{t "Search area"}}</legend>
+                            <legend><i class="fas fa-map" aria-hidden="true"></i> {{t "Search area"}}</legend>
                             <p class="hint">{{t "Latitude and longitude are only required in fast mode."}}</p>
                             <div class="grid-2">
                                 <div class="field">
-                                    <label for="latitude">{{t "Latitude"}}</label>
+                                    <label for="latitude"><i class="fas fa-location-crosshairs" aria-hidden="true"></i> {{t "Latitude"}}</label>
                                     <input type="number" step="any" inputmode="decimal" id="latitude" name="latitude" value="{{.Lat}}">
                                 </div>
                                 <div class="field">
-                                    <label for="longitude">{{t "Longitude"}}</label>
+                                    <label for="longitude"><i class="fas fa-location-crosshairs" aria-hidden="true"></i> {{t "Longitude"}}</label>
                                     <input type="number" step="any" inputmode="decimal" id="longitude" name="longitude" value="{{.Lon}}">
                                 </div>
                                 <div class="field">
-                                    <label for="zoom">{{t "Zoom"}}</label>
+                                    <label for="zoom"><i class="fas fa-magnifying-glass-plus" aria-hidden="true"></i> {{t "Zoom"}}</label>
                                     <input type="number" step="1" id="zoom" name="zoom" value="{{.Zoom}}">
                                 </div>
                                 <div class="field">
-                                    <label for="radius">{{t "Radius in meters"}}</label>
+                                    <label for="radius"><i class="fas fa-bullseye" aria-hidden="true"></i> {{t "Radius in meters"}}</label>
                                     <input type="number" step="1" id="radius" name="radius" value="{{.Radius}}" aria-describedby="radius-hint">
                                     <p class="hint" id="radius-hint">{{t "Places farther than this from the searched area are dropped."}}</p>
                                 </div>
@@ -161,15 +162,15 @@
                         </fieldset>
 
                         <fieldset>
-                            <legend>{{t "Collection"}}</legend>
+                            <legend><i class="fas fa-sliders" aria-hidden="true"></i> {{t "Collection"}}</legend>
                             <div class="grid-2">
                                 <div class="field">
-                                    <label for="depth">{{t "Depth"}}</label>
+                                    <label for="depth"><i class="fas fa-layer-group" aria-hidden="true"></i> {{t "Depth"}}</label>
                                     <input type="number" step="1" min="1" id="depth" name="depth" value="{{.Depth}}" aria-describedby="depth-hint">
                                     <p class="hint" id="depth-hint">{{t "How many times the results list is scrolled."}}</p>
                                 </div>
                                 <div class="field">
-                                    <label for="maxtime">{{t "Max job time"}}</label>
+                                    <label for="maxtime"><i class="fas fa-stopwatch" aria-hidden="true"></i> {{t "Max job time"}}</label>
                                     <input type="text" id="maxtime" name="maxtime" value="{{.MaxTime}}" aria-describedby="maxtime-hint" autocomplete="off">
                                     <p class="hint" id="maxtime-hint">{{t "For example 10m or 1h. Minimum 3m."}}</p>
                                 </div>
@@ -177,34 +178,34 @@
                             <label class="check" for="fastmode">
                                 <input type="checkbox" id="fastmode" name="fastmode" {{if .FastMode}}checked{{end}}>
                                 <span>
-                                    {{t "Fast mode (beta)"}}
+                                    <i class="fas fa-bolt" aria-hidden="true"></i> {{t "Fast mode (beta)"}}
                                     <small>{{t "Searches the area set above and returns fewer details per business."}}</small>
                                 </span>
                             </label>
                             <label class="check" for="email">
                                 <input type="checkbox" id="email" name="email" {{if .Email}}checked{{end}}>
                                 <span>
-                                    {{t "Collect emails"}}
+                                    <i class="fas fa-envelope" aria-hidden="true"></i> {{t "Collect emails"}}
                                     <small>{{t "Visits each business website. Jobs take longer."}}</small>
                                 </span>
                             </label>
                         </fieldset>
 
                         <fieldset>
-                            <legend>{{t "Proxies"}}</legend>
+                            <legend><i class="fas fa-shield-halved" aria-hidden="true"></i> {{t "Proxies"}}</legend>
                             {{if .ProxyScrape}}
                             <button type="button" id="proxyscrape-badge" class="ps-badge" data-state="loading"
                                     title="{{t "Check again"}}" onclick="loadProxyScrape(true)">{{t "Checking ProxyScrape…"}}</button>
                             <label class="check" for="proxy_manual">
                                 <input type="checkbox" id="proxy_manual" name="proxy_manual" onchange="toggleManualProxies()">
                                 <span>
-                                    {{t "Set proxies manually"}}
+                                    <i class="fas fa-hand" aria-hidden="true"></i> {{t "Set proxies manually"}}
                                     <small>{{t "Ignore ProxyScrape and use the list below."}}</small>
                                 </span>
                             </label>
                             {{end}}
                             <div class="field" id="proxies-field" {{if .ProxyScrape}}hidden{{end}}>
-                                <label for="proxies">{{t "One proxy per line"}}</label>
+                                <label for="proxies"><i class="fas fa-list-ul" aria-hidden="true"></i> {{t "One proxy per line"}}</label>
                                 <textarea id="proxies" name="proxies" rows="4" wrap="off" spellcheck="false" aria-describedby="proxies-hint"
                                           placeholder="http://user:pass@host:port&#10;socks5://host:port">{{.ProxiesString}}</textarea>
                                 <p class="hint" id="proxies-hint">{{t "Supports http, https and socks5. Leave empty to connect directly. Proxies are used for Google search. Collecting emails from business websites stays direct."}}</p>
@@ -216,6 +217,7 @@
                 <div class="submit-row">
                     <button type="submit" class="btn-primary" id="submit-btn">
                         <span class="btn-spinner" aria-hidden="true"></span>
+                        <i class="fas fa-magnifying-glass-location btn-icon" aria-hidden="true"></i>
                         <span class="btn-label">{{t "Create job"}}</span>
                     </button>
                     <span class="hint kbd-hint">{{t "or"}} <kbd>Ctrl</kbd> + <kbd>Enter</kbd></span>
@@ -230,13 +232,13 @@
         <section class="panel panel-jobs" aria-labelledby="jobs-title">
             <div class="page-head">
                 <div>
-                    <h1 id="jobs-title">{{t "Jobs"}}</h1>
+                    <h1 id="jobs-title"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</h1>
                     <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
                 </div>
-                <button type="button" class="btn-primary" id="open-job-dialog">+ {{t "New job"}}</button>
+                <button type="button" class="btn-primary" id="open-job-dialog"><i class="fas fa-plus" aria-hidden="true"></i> {{t "New job"}}</button>
             </div>
             <div class="toolbar">
-                <label for="list-campaign">{{t "Campaign"}}</label>
+                <label for="list-campaign"><i class="fas fa-filter" aria-hidden="true"></i> {{t "Campaign"}}</label>
                 <select id="list-campaign">
                     <option value="">{{t "All jobs"}}</option>
                     {{range .Campaigns}}
@@ -262,11 +264,11 @@
                         <option value="new">+ {{t "New campaign…"}}</option>
                     </select>
                     <input type="text" id="bulk-new-name" maxlength="200" autocomplete="off" placeholder="{{t "New campaign name"}}" aria-label="{{t "New campaign name"}}" hidden>
-                    <button type="button" class="btn-quiet" id="bulk-move">{{t "Move"}}</button>
+                    <button type="button" class="btn-quiet" id="bulk-move"><i class="fas fa-arrow-right-arrow-left" aria-hidden="true"></i> {{t "Move"}}</button>
                 </div>
                 <div class="bulk-actions">
-                    <button type="button" class="btn-quiet" id="bulk-clear">{{t "Clear selection"}}</button>
-                    <button type="button" class="btn-danger" id="bulk-delete">{{t "Delete selected"}}</button>
+                    <button type="button" class="btn-quiet" id="bulk-clear"><i class="fas fa-xmark" aria-hidden="true"></i> {{t "Clear selection"}}</button>
+                    <button type="button" class="btn-danger" id="bulk-delete"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Delete selected"}}</button>
                 </div>
             </div>
             <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML" data-campaign="{{.ListCampaign}}" data-page="1">
@@ -276,7 +278,7 @@
             <aside id="sponsor-section" class="sponsor" aria-label="{{t "Support the project"}}">
                 <p>{{t "This project is maintained through sponsorships. If it helps your work, consider supporting it."}}</p>
                 <a href="https://github.com/sponsors/gosom" class="btn-quiet" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "Sponsor on GitHub"}}</a>
-                <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="{{t "Dismiss sponsor note"}}">&times;</button>
+                <button type="button" class="sponsor-close" onclick="hideSponsor()" aria-label="{{t "Dismiss sponsor note"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
             </aside>
         </section>
     </main>

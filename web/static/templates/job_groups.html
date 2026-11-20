@@ -11,14 +11,14 @@
         {{end}}
     </div>
     <dl class="campaign-strip-stats">
-        <div><dt>{{t "Jobs"}}</dt><dd>{{.JobCount}}</dd></div>
-        <div><dt>{{t "Places"}}</dt><dd>{{.Places}}</dd></div>
-        <div><dt>{{t "With email"}}</dt><dd>{{.WithEmail}}</dd></div>
-        <div><dt>{{t "With phone"}}</dt><dd>{{.WithPhone}}</dd></div>
-        <div><dt>WhatsApp</dt><dd>{{.WithWhatsApp}}</dd></div>
+        <div><dt><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</dt><dd>{{.JobCount}}</dd></div>
+        <div><dt><i class="fas fa-location-dot" aria-hidden="true"></i> {{t "Places"}}</dt><dd>{{.Places}}</dd></div>
+        <div><dt><i class="fas fa-envelope" aria-hidden="true"></i> {{t "With email"}}</dt><dd>{{.WithEmail}}</dd></div>
+        <div><dt><i class="fas fa-phone" aria-hidden="true"></i> {{t "With phone"}}</dt><dd>{{.WithPhone}}</dd></div>
+        <div><dt><i class="fab fa-whatsapp" aria-hidden="true"></i> WhatsApp</dt><dd>{{.WithWhatsApp}}</dd></div>
         {{if .CampaignID}}
-        <div><dt>{{t "Emails sent"}}</dt><dd>{{.Sent}}</dd></div>
-        {{if .Failed}}<div><dt>{{t "Failed"}}</dt><dd>{{.Failed}}</dd></div>{{end}}
+        <div><dt><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Emails sent"}}</dt><dd>{{.Sent}}</dd></div>
+        {{if .Failed}}<div><dt><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "Failed"}}</dt><dd>{{.Failed}}</dd></div>{{end}}
         {{end}}
     </dl>
     {{if .CampaignID}}<a class="btn-quiet" href="/campaigns/{{.CampaignID}}">{{t "Configure campaign"}}</a>{{end}}
@@ -31,10 +31,10 @@
         <thead>
             <tr>
                 <th scope="col" class="cell-select"><input type="checkbox" class="select-group" aria-label="{{t "Select all jobs on this page"}}"></th>
-                <th scope="col">{{t "Job"}}</th>
-                {{if not .Filter}}<th scope="col">{{t "Campaign"}}</th>{{end}}
-                <th scope="col">{{t "Created (UTC)"}}</th>
-                <th scope="col">{{t "Status"}}</th>
+                <th scope="col"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Job"}}</th>
+                {{if not .Filter}}<th scope="col"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaign"}}</th>{{end}}
+                <th scope="col"><i class="fas fa-calendar" aria-hidden="true"></i> {{t "Created (UTC)"}}</th>
+                <th scope="col"><i class="fas fa-signal" aria-hidden="true"></i> {{t "Status"}}</th>
                 <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
             </tr>
         </thead>
@@ -93,8 +93,8 @@
                         hx-get="/view?id={{.ID}}"
                         hx-target="#map-modal-container"
                         hx-swap="innerHTML"
-                        aria-label="{{t "View %s on map" .Name}}">{{t "Map"}}</button>
-                <a href="/download?id={{.ID}}" download hx-boost="false" class="btn-quiet download-button" aria-label="{{t "Download CSV for %s" .Name}}">CSV</a>
+                        aria-label="{{t "View %s on map" .Name}}"><i class="fas fa-map-location-dot" aria-hidden="true"></i> {{t "Map"}}</button>
+                <a href="/download?id={{.ID}}" download hx-boost="false" class="btn-quiet download-button" aria-label="{{t "Download CSV for %s" .Name}}"><i class="fas fa-file-csv" aria-hidden="true"></i> CSV</a>
                 {{end}}
                 <button hx-delete="/delete?id={{.ID}}"
                         hx-target="#job-groups"
@@ -102,7 +102,7 @@
                         hx-confirm="{{t `Delete the job "%s" and its CSV? This cannot be undone.` .Name}}"
                         type="button"
                         class="btn-danger delete-button"
-                        aria-label="{{t "Delete %s" .Name}}">{{t "Delete"}}</button>
+                        aria-label="{{t "Delete %s" .Name}}"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Delete"}}</button>
             </td>
         </tr>
         {{end}}
@@ -115,14 +115,14 @@
     {{if .HasPages}}
     <div class="pager-buttons">
         <button type="button" class="btn-quiet" {{if not .HasPrev}}disabled{{end}}
-                hx-get="/jobs" hx-vals='{"list_page": "1"}' hx-target="#job-groups" hx-swap="outerHTML" aria-label="{{t "First page"}}">«</button>
+                hx-get="/jobs" hx-vals='{"list_page": "1"}' hx-target="#job-groups" hx-swap="outerHTML" aria-label="{{t "First page"}}"><i class="fas fa-angles-left" aria-hidden="true"></i></button>
         <button type="button" class="btn-quiet" {{if not .HasPrev}}disabled{{end}}
-                hx-get="/jobs" hx-vals='{"list_page": "{{.PrevPage}}"}' hx-target="#job-groups" hx-swap="outerHTML">{{t "Previous"}}</button>
+                hx-get="/jobs" hx-vals='{"list_page": "{{.PrevPage}}"}' hx-target="#job-groups" hx-swap="outerHTML"><i class="fas fa-angle-left" aria-hidden="true"></i> {{t "Previous"}}</button>
         <span class="pager-current">{{t "Page %d of %d" .CurrentPage .TotalPages}}</span>
         <button type="button" class="btn-quiet" {{if not .HasNext}}disabled{{end}}
-                hx-get="/jobs" hx-vals='{"list_page": "{{.NextPage}}"}' hx-target="#job-groups" hx-swap="outerHTML">{{t "Next"}}</button>
+                hx-get="/jobs" hx-vals='{"list_page": "{{.NextPage}}"}' hx-target="#job-groups" hx-swap="outerHTML">{{t "Next"}} <i class="fas fa-angle-right" aria-hidden="true"></i></button>
         <button type="button" class="btn-quiet" {{if not .HasNext}}disabled{{end}}
-                hx-get="/jobs" hx-vals='{"list_page": "{{.TotalPages}}"}' hx-target="#job-groups" hx-swap="outerHTML" aria-label="{{t "Last page"}}">»</button>
+                hx-get="/jobs" hx-vals='{"list_page": "{{.TotalPages}}"}' hx-target="#job-groups" hx-swap="outerHTML" aria-label="{{t "Last page"}}"><i class="fas fa-angles-right" aria-hidden="true"></i></button>
     </div>
     {{end}}
 </nav>

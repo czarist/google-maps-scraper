@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
@@ -25,13 +26,13 @@
             <span class="brand-name">Google Maps Scraper</span>
         </div>
         <nav class="topnav" aria-label="{{t "Sections"}}">
-            <a href="/">{{t "Dashboard"}}</a>
-            <a href="/tasks">{{t "Jobs"}}</a>
-            <a href="/campaigns" aria-current="page">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="/"><i class="fas fa-gauge-high" aria-hidden="true"></i> {{t "Dashboard"}}</a>
+            <a href="/tasks"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</a>
+            <a href="/campaigns" aria-current="page"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false"><i class="fas fa-book" aria-hidden="true"></i> {{t "API documentation"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
-                <span class="theme-label-dark">{{t "Dark mode"}}</span>
-                <span class="theme-label-light">{{t "Light mode"}}</span>
+                <span class="theme-label-dark"><i class="fas fa-moon" aria-hidden="true"></i> {{t "Dark mode"}}</span>
+                <span class="theme-label-light"><i class="fas fa-sun" aria-hidden="true"></i> {{t "Light mode"}}</span>
             </button>
             {{langSwitch}}
         </nav>
@@ -42,14 +43,14 @@
         <section class="panel campaign-head" aria-labelledby="campaign-title">
             <div class="page-head">
                 <div>
-                    <p class="eyebrow"><a href="/campaigns">{{t "Campaigns"}}</a> /</p>
+                    <p class="eyebrow"><a href="/campaigns"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</a> /</p>
                     <h1 id="campaign-title">{{.Campaign.Name}}</h1>
-                    <p class="lede">{{t "Service"}}: <code>{{.Campaign.ServiceName}}</code></p>
+                    <p class="lede"><i class="fas fa-server" aria-hidden="true"></i> {{t "Service"}}: <code>{{.Campaign.ServiceName}}</code></p>
                 </div>
                 <div class="page-actions">
                     <a class="btn-quiet" href="/tasks?campaign={{.Campaign.ID}}">{{t "See jobs"}}</a>
                     <a class="btn-quiet" href="/campaigns/{{.Campaign.ID}}/leads.csv" download hx-boost="false" title="{{t "One line per business, merged across the jobs, with phones, WhatsApp and emails"}}">{{t "Export leads (CSV)"}}</a>
-                    <button type="button" class="btn-quiet" data-open-dialog="campaign-edit-dialog">{{t "Edit campaign"}}</button>
+                    <button type="button" class="btn-quiet" data-open-dialog="campaign-edit-dialog"><i class="fas fa-pen-to-square" aria-hidden="true"></i> {{t "Edit campaign"}}</button>
                 </div>
             </div>
 
@@ -62,35 +63,35 @@
                  hx-swap="none"></div>
 
             <div class="stats-grid" id="live-stats" aria-label="{{t "Campaign numbers"}}">
-                <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label">{{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label">{{t "places found"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label">{{t "places with email"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.WithPhone}}</span><span class="stat-label">{{t "places with phone"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.WithWhatsApp}}</span><span class="stat-label">{{t "places with WhatsApp"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label">{{t "email addresses found"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label">{{t "waiting to be sent"}}</span></div>
-                <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label">{{t "accepted by the SMTP server"}}</span></div>
-                <div class="stat{{if .Stats.SendFailed}} stat-bad{{end}}"><span class="stat-value">{{.Stats.SendFailed}}</span><span class="stat-label">{{t "failed to send"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Dispatches}}</span><span class="stat-label">{{t "dispatch runs"}}{{if .Stats.LastSentLabel}} · {{t "last send %s UTC" .Stats.LastSentLabel}}{{end}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label"><i class="fas fa-location-dot" aria-hidden="true"></i> {{t "places found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label"><i class="fas fa-envelope" aria-hidden="true"></i> {{t "places with email"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithPhone}}</span><span class="stat-label"><i class="fas fa-phone" aria-hidden="true"></i> {{t "places with phone"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithWhatsApp}}</span><span class="stat-label"><i class="fas fa-comment-dots" aria-hidden="true"></i> {{t "places with WhatsApp"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label"><i class="fas fa-at" aria-hidden="true"></i> {{t "email addresses found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label"><i class="fas fa-hourglass-half" aria-hidden="true"></i> {{t "waiting to be sent"}}</span></div>
+                <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label"><i class="fas fa-circle-check" aria-hidden="true"></i> {{t "accepted by the SMTP server"}}</span></div>
+                <div class="stat stat-with-action{{if .Stats.SendFailed}} stat-bad{{end}}"><span class="stat-value">{{.Stats.SendFailed}}</span><span class="stat-label"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "failed to send"}}</span>{{if .Stats.SendFailed}}<form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/requeue" class="stat-action"><button type="submit" class="icon-button" data-tip="{{t "Put the emails back in the send queue"}}" aria-label="{{t "Put the emails back in the send queue"}}"><i class="fas fa-rotate-left" aria-hidden="true"></i></button></form>{{end}}</div>
+                <div class="stat"><span class="stat-value">{{.Stats.Dispatches}}</span><span class="stat-label"><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "dispatch runs"}}{{if .Stats.LastSentLabel}} · {{t "last send %s UTC" .Stats.LastSentLabel}}{{end}}</span></div>
             </div>
             <p class="hint">{{t "Accepted means the SMTP server took the message. Bounces and inbox delivery are not tracked."}}</p>
         </section>
 
         <nav class="tabs" role="tablist" aria-label="{{t "Campaign sections"}}">
-            <a href="#jobs" role="tab" data-tab="jobs">{{t "Jobs"}}</a>
-            <a href="#email" role="tab" data-tab="email">{{t "Email"}}</a>
-            <a href="#send" role="tab" data-tab="send">{{t "Send"}}</a>
-            <a href="#history" role="tab" data-tab="history">{{t "History"}}</a>
+            <a href="#jobs" role="tab" data-tab="jobs"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</a>
+            <a href="#email" role="tab" data-tab="email"><i class="fas fa-envelope" aria-hidden="true"></i> {{t "Email"}}</a>
+            <a href="#send" role="tab" data-tab="send"><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send"}}</a>
+            <a href="#history" role="tab" data-tab="history"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> {{t "History"}}</a>
         </nav>
 
         <section class="panel tab-panel" id="tab-jobs" data-panel="jobs" role="tabpanel">
-            <h2>{{t "Jobs"}}</h2>
+            <h2><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</h2>
             <div class="table-wrap" id="live-jobs">
                 <table>
                     <thead>
                         <tr>
-                            <th scope="col">{{t "Job"}}</th>
-                            <th scope="col">{{t "Status"}}</th>
+                            <th scope="col"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Job"}}</th>
+                            <th scope="col"><i class="fas fa-signal" aria-hidden="true"></i> {{t "Status"}}</th>
                             <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
                         </tr>
                     </thead>
@@ -102,12 +103,12 @@
                             <td class="actions">
                                 <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/remove">
                                     <input type="hidden" name="job_id" value="{{.ID}}">
-                                    <button type="submit" class="btn-quiet">{{t "Remove"}}</button>
+                                    <button type="submit" class="btn-quiet"><i class="fas fa-xmark" aria-hidden="true"></i> {{t "Remove"}}</button>
                                 </form>
                             </td>
                         </tr>
                         {{else}}
-                        <tr class="empty-row"><td colspan="3">{{t "No jobs in this campaign yet."}}</td></tr>
+                        <tr class="empty-row"><td colspan="3"><i class="fas fa-inbox" aria-hidden="true"></i> {{t "No jobs in this campaign yet."}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>
@@ -116,7 +117,7 @@
             {{if .Available}}
             <form method="post" action="/campaigns/{{.Campaign.ID}}/jobs">
                 <div class="field">
-                    <label for="job_id">{{t "Add an existing job"}}</label>
+                    <label for="job_id"><i class="fas fa-folder-plus" aria-hidden="true"></i> {{t "Add an existing job"}}</label>
                     <select id="job_id" name="job_id">
                         {{range .Available}}
                         <option value="{{.ID}}">{{.Name}}{{if .CampaignName}} ({{t "moves from %s" .CampaignName}}){{end}}</option>
@@ -124,7 +125,7 @@
                     </select>
                     <p class="hint">{{t "A job can belong to one campaign. Adding it here removes it from the other one."}}</p>
                 </div>
-                <button type="submit" class="btn-primary">{{t "Add job"}}</button>
+                <button type="submit" class="btn-primary"><i class="fas fa-plus" aria-hidden="true"></i> {{t "Add job"}}</button>
             </form>
             {{else}}
             <p class="hint">{{t "Every job is already in this campaign, or there are no jobs yet. Create a job and choose this campaign."}}</p>
@@ -134,23 +135,23 @@
         <section class="panel tab-panel" id="tab-email" data-panel="email" role="tabpanel" aria-labelledby="mail-title">
             <div class="email-grid">
                 <div>
-                    <h2 id="mail-title">{{t "Email dispatch"}}</h2>
+                    <h2 id="mail-title"><i class="fas fa-envelope" aria-hidden="true"></i> {{t "Email dispatch"}}</h2>
                     <p class="lede">{{t "These settings are used only for %s." .Campaign.Name}}</p>
             <form id="mail-form" method="post" action="/campaigns/{{.Campaign.ID}}/mail" data-id="{{.Campaign.ID}}">
                 <fieldset>
-                    <legend>{{t "SMTP server"}}</legend>
+                    <legend><i class="fas fa-server" aria-hidden="true"></i> {{t "SMTP server"}}</legend>
                     <div class="field">
-                        <label for="smtp_host">{{t "Host"}}</label>
+                        <label for="smtp_host"><i class="fas fa-server" aria-hidden="true"></i> {{t "Host"}}</label>
                         <input type="text" id="smtp_host" name="smtp_host" value="{{.Mail.Host}}" autocomplete="off" placeholder="mailpit">
                         <p class="hint">{{t "Dev inbox: host"}} <code>mailpit</code>, {{t "port"}} <code>1025</code>, {{t "no encryption. Open"}} <a href="http://127.0.0.1:8026" hx-boost="false">Mailpit</a>.</p>
                     </div>
                     <div class="grid-2">
                         <div class="field">
-                            <label for="smtp_port">{{t "Port"}}</label>
+                            <label for="smtp_port"><i class="fas fa-hashtag" aria-hidden="true"></i> {{t "Port"}}</label>
                             <input type="number" id="smtp_port" name="smtp_port" min="1" max="65535" value="{{.Mail.Port}}" required>
                         </div>
                         <div class="field">
-                            <label for="encryption">{{t "Encryption"}}</label>
+                            <label for="encryption"><i class="fas fa-lock" aria-hidden="true"></i> {{t "Encryption"}}</label>
                             <select id="encryption" name="encryption">
                                 <option value="starttls" {{if .Mail.EncryptionIs "starttls"}}selected{{end}}>STARTTLS ({{t "usually"}} 587)</option>
                                 <option value="ssl" {{if .Mail.EncryptionIs "ssl"}}selected{{end}}>SSL ({{t "usually"}} 465)</option>
@@ -159,12 +160,12 @@
                         </div>
                     </div>
                     <div class="field">
-                        <label for="smtp_username">{{t "Username"}}</label>
+                        <label for="smtp_username"><i class="fas fa-user" aria-hidden="true"></i> {{t "Username"}}</label>
                         <input type="text" id="smtp_username" name="smtp_username" value="{{.Mail.Username}}" autocomplete="off">
                         <p class="hint">{{t "Leave empty if the server does not require a login."}}</p>
                     </div>
                     <div class="field">
-                        <label for="smtp_password">{{t "Password"}}</label>
+                        <label for="smtp_password"><i class="fas fa-key" aria-hidden="true"></i> {{t "Password"}}</label>
                         <input type="password" id="smtp_password" name="smtp_password" value="" autocomplete="new-password">
                         {{if .PasswordSet}}
                         <p class="hint">{{t "A password is saved. Leave this blank to keep it."}}</p>
@@ -175,40 +176,40 @@
                 </fieldset>
 
                 <fieldset>
-                    <legend>{{t "Message"}}</legend>
+                    <legend><i class="fas fa-envelope-open-text" aria-hidden="true"></i> {{t "Message"}}</legend>
                     <div class="grid-2">
                         <div class="field">
-                            <label for="from_email">{{t "From email"}}</label>
+                            <label for="from_email"><i class="fas fa-at" aria-hidden="true"></i> {{t "From email"}}</label>
                             <input type="email" id="from_email" name="from_email" value="{{.Mail.FromEmail}}" autocomplete="off">
                         </div>
                         <div class="field">
-                            <label for="from_name">{{t "From name"}}</label>
+                            <label for="from_name"><i class="fas fa-signature" aria-hidden="true"></i> {{t "From name"}}</label>
                             <input type="text" id="from_name" name="from_name" value="{{.Mail.FromName}}" autocomplete="off">
                         </div>
                     </div>
                     <div class="field">
-                        <label for="subject">{{t "Subject"}}</label>
+                        <label for="subject"><i class="fas fa-heading" aria-hidden="true"></i> {{t "Subject"}}</label>
                         <input type="text" id="subject" name="subject" value="{{.Mail.Subject}}" maxlength="500" autocomplete="off">
                     </div>
                     <div class="field">
-                        <label for="format">{{t "Body format"}}</label>
+                        <label for="format"><i class="fas fa-code" aria-hidden="true"></i> {{t "Body format"}}</label>
                         <select id="format" name="format">
                             <option value="plain" {{if .Mail.FormatIs "plain"}}selected{{end}}>{{t "Plain text"}}</option>
                             <option value="html" {{if .Mail.FormatIs "html"}}selected{{end}}>HTML</option>
                         </select>
                     </div>
                     <div class="field">
-                        <label for="html_file">{{t "HTML file"}}</label>
+                        <label for="html_file"><i class="fas fa-file-code" aria-hidden="true"></i> {{t "HTML file"}}</label>
                         <input type="file" id="html_file" accept=".html,.htm,text/html">
                         <p class="hint">{{t "The file is loaded into the editor. Change it there, then save. Nothing is stored until you save."}}</p>
                     </div>
                     <div class="field">
-                        <label for="body">{{t "Body"}}</label>
+                        <label for="body"><i class="fas fa-align-left" aria-hidden="true"></i> {{t "Body"}}</label>
                         <textarea id="body" name="body" class="mail-body" rows="16" spellcheck="false">{{.Mail.Body}}</textarea>
                         <p class="hint">{{t "Placeholders:"}} {{"{{.Title}}"}} {{"{{.Email}}"}} {{"{{.Phone}}"}} {{"{{.Website}}"}} {{"{{.Address}}"}} {{"{{.Category}}"}}. {{t "Other {{ }} marks make the template invalid."}}</p>
                     </div>
                     <div class="field">
-                        <label for="test_to">{{t "Send a test to"}}</label>
+                        <label for="test_to"><i class="fas fa-vial" aria-hidden="true"></i> {{t "Send a test to"}}</label>
                         <input type="email" id="test_to" name="test_to" autocomplete="off" placeholder="you@example.com">
                         <p class="hint">{{t "The test and the preview use this form and do not save it."}}</p>
                     </div>
@@ -216,10 +217,10 @@
 
                 <div id="mail-result" class="notice" hidden></div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-primary">{{t "Save email settings"}}</button>
-                    <button type="button" class="btn-quiet" id="mail-check">{{t "Test SMTP connection"}}</button>
-                    <button type="button" class="btn-quiet" id="mail-preview">{{t "Preview"}}</button>
-                    <button type="button" class="btn-quiet" id="mail-test">{{t "Send test"}}</button>
+                    <button type="submit" class="btn-primary"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save email settings"}}</button>
+                    <button type="button" class="btn-quiet" id="mail-check"><i class="fas fa-plug" aria-hidden="true"></i> {{t "Test SMTP connection"}}</button>
+                    <button type="button" class="btn-quiet" id="mail-preview"><i class="fas fa-eye" aria-hidden="true"></i> {{t "Preview"}}</button>
+                    <button type="button" class="btn-quiet" id="mail-test"><i class="fas fa-vial" aria-hidden="true"></i> {{t "Send test"}}</button>
                 </div>
                 <p class="hint">{{t "Saving while emails are being sent (or paused) switches the running send to the new server, login, password and sender from the next email. Subject and body changes apply to the next send."}}</p>
                 <noscript><p class="hint">{{t "Upload, preview, and the connection test need JavaScript. You can still paste the message and save."}}</p></noscript>
@@ -235,7 +236,7 @@
         </section>
 
         <section class="panel tab-panel" id="tab-send" data-panel="send" role="tabpanel">
-            <h2>{{t "Send emails"}}</h2>
+            <h2><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
             <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, with a random 5 to 8 second pause between messages and a 20 second pause after every 20."}}</p>
@@ -243,10 +244,10 @@
             <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
                 <label class="check" for="resend">
                     <input type="checkbox" id="resend" name="resend">
-                    <span>{{t "Send again to addresses that already received this campaign"}}</span>
+                    <span><i class="fas fa-rotate-right" aria-hidden="true"></i> {{t "Send again to addresses that already received this campaign"}}</span>
                 </label>
                 <div class="field resend-after">
-                    <label for="resend_after_days">{{t "Only if they received it at least"}}</label>
+                    <label for="resend_after_days"><i class="fas fa-calendar-days" aria-hidden="true"></i> {{t "Only if they received it at least"}}</label>
                     <div class="resend-after-input">
                         <input type="number" id="resend_after_days" name="resend_after_days" value="4" min="0" step="1" inputmode="numeric">
                         <span>{{t "days ago"}}</span>
@@ -254,66 +255,62 @@
                     <p class="hint">{{t "Applies only when sending again. 0 sends again to everyone."}}</p>
                 </div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Paused}}{{t "Paused"}}{{else if .Running}}{{t "Sending"}}{{else}}{{t "Send emails"}}{{end}}</button>
+                    <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Paused}}<i class="fas fa-pause" aria-hidden="true"></i> {{t "Paused"}}{{else if .Running}}<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> {{t "Sending"}}{{else}}<i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}{{end}}</button>
                 </div>
             </form>
 
             <div id="live-dispatch-controls" class="submit-row dispatch-controls">
                 {{if .Paused}}
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/resume">
-                    <button type="submit" class="btn-primary">{{t "Resume sending"}}</button>
+                    <button type="submit" class="btn-primary"><i class="fas fa-play" aria-hidden="true"></i> {{t "Resume sending"}}</button>
                 </form>
                 <p class="hint">{{t "Paused before the next email. Change the server, password or sender in the Email tab, save, then resume: the rest is sent with the new settings."}}</p>
                 {{else if .Running}}
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/pause">
-                    <button type="submit" class="btn-quiet">{{t "Pause sending"}}</button>
+                    <button type="submit" class="btn-quiet"><i class="fas fa-pause" aria-hidden="true"></i> {{t "Pause sending"}}</button>
                 </form>
                 {{else if .Stats.SendFailed}}
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/failed">
-                    <button type="submit" class="btn-quiet">{{t "Send again to the %d failed addresses" .Stats.SendFailed}}</button>
+                    <button type="submit" class="btn-quiet"><i class="fas fa-rotate-right" aria-hidden="true"></i> {{t "Send again to the %d failed addresses" .Stats.SendFailed}}</button>
                 </form>
-                <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/requeue">
-                    <button type="submit" class="btn-quiet">{{t "Move the %d failed addresses back to waiting" .Stats.SendFailed}}</button>
-                </form>
-                <p class="hint">{{t "Send again sends only the failed addresses now. Move back to waiting sends nothing now: the failed addresses join the ones waiting to be sent and go out with the next send, manual or automatic."}}</p>
                 {{end}}
             </div>
 
             <form method="post" action="/campaigns/{{.Campaign.ID}}/auto" class="auto-dispatch">
-                <h3>{{t "Automatic sending"}} <span class="status {{if .Auto.Enabled}}status-ok{{else}}status-pending{{end}}">{{if .Auto.Enabled}}{{t "On"}}{{else}}{{t "Off"}}{{end}}</span></h3>
+                <h3><i class="fas fa-robot" aria-hidden="true"></i> {{t "Automatic sending"}} <span class="status {{if .Auto.Enabled}}status-ok{{else}}status-pending{{end}}">{{if .Auto.Enabled}}{{t "On"}}{{else}}{{t "Off"}}{{end}}</span></h3>
                 <label class="check" for="auto_enabled">
                     <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
                     <span>
-                        {{t "Send automatically to new addresses"}}
+                        <i class="fas fa-robot" aria-hidden="true"></i> {{t "Send automatically to new addresses"}}
                         <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (5 to 8 seconds apart, 20 seconds after every 20). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send."}}</small>
                     </span>
                 </label>
                 <label class="check" for="auto_resend">
                     <input type="checkbox" id="auto_resend" name="auto_resend" {{if .Auto.Resend}}checked{{end}}>
-                    <span>{{t "Also send again to addresses that received it before"}}</span>
+                    <span><i class="fas fa-rotate-right" aria-hidden="true"></i> {{t "Also send again to addresses that received it before"}}</span>
                 </label>
                 <div class="field resend-after">
-                    <label for="auto_resend_after_days">{{t "Only if they received it at least"}}</label>
+                    <label for="auto_resend_after_days"><i class="fas fa-calendar-days" aria-hidden="true"></i> {{t "Only if they received it at least"}}</label>
                     <div class="resend-after-input">
                         <input type="number" id="auto_resend_after_days" name="auto_resend_after_days" value="{{.Auto.ResendAfterDays}}" min="0" step="1" inputmode="numeric">
                         <span>{{t "days ago"}}</span>
                     </div>
                 </div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-quiet">{{t "Save automatic sending"}}</button>
+                    <button type="submit" class="btn-quiet"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save automatic sending"}}</button>
                 </div>
             </form>
 
             <div class="danger-zone">
-                <h2>{{t "Delete campaign"}}</h2>
+                <h2><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "Delete campaign"}}</h2>
             <div class="campaign-delete">
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
-                    <button type="submit" class="btn-danger">{{t "Delete campaign, keep jobs"}}</button>
+                    <button type="submit" class="btn-danger"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Delete campaign, keep jobs"}}</button>
                 </form>
                 {{if .Jobs}}
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign AND its %d jobs with their CSV files? Email settings and send history are removed too. This cannot be undone." (len .Jobs)}}">
                     <input type="hidden" name="delete_jobs" value="1">
-                    <button type="submit" class="btn-danger">{{t "Delete campaign and its %d jobs" (len .Jobs)}}</button>
+                    <button type="submit" class="btn-danger"><i class="fas fa-trash-can" aria-hidden="true"></i> {{t "Delete campaign and its %d jobs" (len .Jobs)}}</button>
                 </form>
                 {{end}}
             </div>
@@ -321,13 +318,13 @@
         </section>
 
         <section class="panel tab-panel" id="tab-history" data-panel="history" role="tabpanel" aria-labelledby="history-title">
-            <h2 id="history-title">{{t "History"}}</h2>
+            <h2 id="history-title"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> {{t "History"}}</h2>
             <div class="table-wrap" id="live-history">
                 <table class="history-list">
                     <thead>
                         <tr>
-                            <th scope="col">{{t "Started (UTC)"}}</th>
-                            <th scope="col">{{t "Status"}}</th>
+                            <th scope="col"><i class="fas fa-calendar" aria-hidden="true"></i> {{t "Started (UTC)"}}</th>
+                            <th scope="col"><i class="fas fa-signal" aria-hidden="true"></i> {{t "Status"}}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -345,21 +342,21 @@
                             </td>
                         </tr>
                         {{else}}
-                        <tr class="empty-row"><td colspan="2">{{t "No dispatches yet."}}</td></tr>
+                        <tr class="empty-row"><td colspan="2"><i class="fas fa-inbox" aria-hidden="true"></i> {{t "No dispatches yet."}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>
             </div>
 
             <div id="live-sends">
-            <h3>{{t "Emails by address"}}</h3>
+            <h3><i class="fas fa-at" aria-hidden="true"></i> {{t "Emails by address"}}</h3>
             {{if .Stats.SendFailed}}<p class="hint">{{t "Failed addresses are tried again on the next dispatch."}}</p>{{end}}
             <div class="table-wrap">
                 <table>
                     <thead>
                         <tr>
-                            <th scope="col">{{t "Email"}}</th>
-                            <th scope="col">{{t "Result"}}</th>
+                            <th scope="col"><i class="fas fa-at" aria-hidden="true"></i> {{t "Email"}}</th>
+                            <th scope="col"><i class="fas fa-flag-checkered" aria-hidden="true"></i> {{t "Result"}}</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -368,13 +365,13 @@
                             <td data-label="{{t "Email"}}" class="mail-address">{{.Email}}<span class="job-id">{{.SentLabel}} UTC</span></td>
                             <td data-label="{{t "Result"}}">
                                 {{if eq .Status "sent"}}<span class="status status-ok">{{t "Accepted"}}</span>
-                                {{else if eq .Status "unsubscribed"}}<span class="status status-pending">{{t "Unsubscribed"}}</span>
+                                {{else if eq .Status "unsubscribed"}}<span class="status status-pending status-optout">{{t "Unsubscribed"}}</span>
                                 {{else}}<span class="status status-failed">{{t "Failed"}}</span>
                                 {{if .Error}}<p class="run-line mail-error">{{.Error}}</p>{{end}}{{end}}
                             </td>
                         </tr>
                         {{else}}
-                        <tr class="empty-row"><td colspan="2">{{t "No emails sent yet."}}</td></tr>
+                        <tr class="empty-row"><td colspan="2"><i class="fas fa-inbox" aria-hidden="true"></i> {{t "No emails sent yet."}}</td></tr>
                         {{end}}
                     </tbody>
                 </table>
@@ -386,22 +383,22 @@
             <section class="panel">
                 <div class="modal-head">
                     <h2 id="edit-title">{{t "Edit campaign"}}</h2>
-                    <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                    <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
                 </div>
             <form method="post" action="/campaigns/{{.Campaign.ID}}/rename">
                 <div class="field">
-                    <label for="rename">{{t "Campaign name"}}</label>
+                    <label for="rename"><i class="fas fa-tag" aria-hidden="true"></i> {{t "Campaign name"}}</label>
                     <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
                 </div>
                 <div class="field">
-                    <label for="campaign-service">{{t "Service"}} · <a href="/campaigns#services">{{t "Manage services"}}</a></label>
+                    <label for="campaign-service"><i class="fas fa-server" aria-hidden="true"></i> {{t "Service"}} · <a href="/campaigns#services">{{t "Manage services"}}</a></label>
                     <select id="campaign-service" name="servico" required>
                         {{range .Services}}<option value="{{.Name}}"{{if eq .Name $.Campaign.ServiceName}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
                     </select>
                     <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
                 </div>
                 <div class="submit-row">
-                    <button type="submit" class="btn-primary">{{t "Save"}}</button>
+                    <button type="submit" class="btn-primary"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save"}}</button>
                 </div>
             </form>
             </section>

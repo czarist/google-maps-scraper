@@ -799,6 +799,11 @@ button {
     display: inline-block;
 }
 
+/* The spinner replaces the icon while the job is being created. */
+.btn-primary[aria-busy="true"] .btn-icon {
+    display: none;
+}
+
 @keyframes spin {
     to { transform: rotate(360deg); }
 }
@@ -1733,16 +1738,18 @@ tr.is-new td {
 }
 
 /* Selecting several jobs to delete at once. */
+/* Centered like the job name next to it, also when other columns make the row tall. */
 .job-table .cell-select {
     width: 1%;
     padding-right: 0;
-    vertical-align: top;
+    vertical-align: middle;
 }
 
 .cell-select input {
+    display: block;
     width: 18px;
     height: 18px;
-    margin: 2px 0 0;
+    margin: 0;
     accent-color: var(--water);
     cursor: pointer;
 }
@@ -2370,4 +2377,176 @@ dialog .service-new > button {
     .dash-stats {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+}
+
+/* Pause, resume and failed-address buttons under "Send emails". */
+.dispatch-controls {
+    margin-top: 12px;
+}
+
+.dispatch-controls .hint {
+    flex-basis: 100%;
+    margin: 0;
+}
+
+/* Font Awesome icons in text keep the label's color and line. */
+.fas,
+.fab {
+    line-height: 1;
+}
+
+/* Headings: icon in the brand blue. */
+h1 > .fas,
+h2 > .fas,
+h3 > .fas,
+legend > .fas {
+    color: var(--water);
+    margin-right: 0.15em;
+}
+
+/* Field labels, table headers, facts and stat labels: quiet, fixed-width icons
+   so the text lines up in a column. */
+label > .fas,
+th > .fas,
+dt > .fas,
+dt > .fab,
+.stat-label > .fas,
+.lede > .fas,
+.check .fas,
+summary .fas {
+    width: 1.15em;
+    text-align: center;
+    color: var(--muted);
+}
+
+.stat-ok .stat-label > .fas {
+    color: var(--ok);
+}
+
+.stat-bad .stat-label > .fas {
+    color: var(--pin);
+}
+
+.empty-row .fas {
+    margin-right: 0.35em;
+    color: var(--muted);
+}
+
+/* Status badges and notices get an icon from the Font Awesome font instead of
+   a plain dot, also when the badge is built by a script. */
+.status::before,
+.notice::before {
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    line-height: 1;
+}
+
+.status::before {
+    content: "\f111"; /* circle */
+    width: auto;
+    height: auto;
+    border-radius: 0;
+    background: none;
+    font-size: 0.7rem;
+}
+
+.status-ok::before {
+    content: "\f00c"; /* check */
+}
+
+.status-pending::before {
+    content: "\f017"; /* clock */
+}
+
+.status-working::before {
+    content: "\f110"; /* spinner */
+    animation: spin 1.2s linear infinite;
+}
+
+.status-failed::before {
+    content: "\f00d"; /* xmark */
+}
+
+.status-optout::before {
+    content: "\f506"; /* user-slash */
+}
+
+.notice::before {
+    margin-right: 8px;
+}
+
+.notice-success::before {
+    content: "\f058"; /* circle-check */
+}
+
+.notice-error::before {
+    content: "\f06a"; /* circle-exclamation */
+}
+
+/* A stat card with a small action in its corner (e.g. requeue failed emails). */
+.stat-with-action {
+    position: relative;
+}
+
+.stat-action {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    margin: 0;
+}
+
+.icon-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-field);
+    background: var(--surface);
+    color: var(--muted);
+    cursor: pointer;
+}
+
+.icon-button:hover,
+.icon-button:focus-visible {
+    color: var(--water);
+    border-color: var(--water);
+}
+
+.icon-button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus);
+}
+
+/* Tooltip from data-tip, shown on hover and keyboard focus. */
+.icon-button[data-tip]::after {
+    content: attr(data-tip);
+    position: absolute;
+    right: 0;
+    bottom: calc(100% + 8px);
+    z-index: 10;
+    width: max-content;
+    max-width: 220px;
+    padding: 6px 10px;
+    border-radius: var(--radius-field);
+    background: var(--ink);
+    color: var(--surface);
+    font-size: 0.8rem;
+    font-weight: 600;
+    line-height: 1.3;
+    text-align: left;
+    white-space: normal;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.12s, transform 0.12s;
+}
+
+.icon-button[data-tip]:hover::after,
+.icon-button[data-tip]:focus-visible::after {
+    opacity: 1;
+    transform: translateY(0);
 }

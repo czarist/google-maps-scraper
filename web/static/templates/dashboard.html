@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Overpass:wght@400;600;800&display=swap">
     <script src="/static/js/theme.js"></script>
     <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer">
     <meta name="htmx-config" content='{"useTemplateFragments":true}'>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
@@ -25,13 +26,13 @@
             <span class="brand-name">Google Maps Scraper</span>
         </div>
         <nav class="topnav" aria-label="{{t "Sections"}}">
-            <a href="/" aria-current="page">{{t "Dashboard"}}</a>
-            <a href="/tasks">{{t "Jobs"}}</a>
-            <a href="/campaigns">{{t "Campaigns"}}</a>
-            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false">{{t "API documentation"}}</a>
+            <a href="/" aria-current="page"><i class="fas fa-gauge-high" aria-hidden="true"></i> {{t "Dashboard"}}</a>
+            <a href="/tasks"><i class="fas fa-list-check" aria-hidden="true"></i> {{t "Jobs"}}</a>
+            <a href="/campaigns"><i class="fas fa-bullhorn" aria-hidden="true"></i> {{t "Campaigns"}}</a>
+            <a href="/api/docs" target="_blank" rel="noopener noreferrer" hx-boost="false"><i class="fas fa-book" aria-hidden="true"></i> {{t "API documentation"}}</a>
             <button type="button" class="theme-toggle" id="theme-toggle" aria-pressed="false">
-                <span class="theme-label-dark">{{t "Dark mode"}}</span>
-                <span class="theme-label-light">{{t "Light mode"}}</span>
+                <span class="theme-label-dark"><i class="fas fa-moon" aria-hidden="true"></i> {{t "Dark mode"}}</span>
+                <span class="theme-label-light"><i class="fas fa-sun" aria-hidden="true"></i> {{t "Light mode"}}</span>
             </button>
             {{langSwitch}}
         </nav>
@@ -41,7 +42,7 @@
         <section class="panel">
             <div class="page-head">
                 <div>
-                    <h1 id="dash-title">{{t "Dashboard"}}</h1>
+                    <h1 id="dash-title"><i class="fas fa-gauge-high" aria-hidden="true"></i> {{t "Dashboard"}}</h1>
                     <p class="lede">{{t "The machine, the scraper, proxies, email and backups at a glance. Refreshes every 5 seconds."}}</p>
                 </div>
                 <div class="page-actions">

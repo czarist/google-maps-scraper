@@ -316,7 +316,7 @@ func TestJobGroupsByCampaignWithEmailNumbers(t *testing.T) {
 	srv.getJobs(rec, httptest.NewRequest(http.MethodGet, "/jobs?list_campaign="+full.ID, http.NoBody))
 	body := rec.Body.String()
 
-	for _, want := range []string{`href="/campaigns/` + full.ID + `">Configure campaign</a>`, "<dt>Emails sent</dt><dd>1</dd>", "<dt>Failed</dt><dd>1</dd>", "<dt>With email</dt><dd>2</dd>", "escolas"} {
+	for _, want := range []string{`href="/campaigns/` + full.ID + `">Configure campaign</a>`, "Emails sent</dt><dd>1</dd>", "Failed</dt><dd>1</dd>", "With email</dt><dd>2</dd>", "escolas"} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("filtered list missing %q: %s", want, body)
 		}
