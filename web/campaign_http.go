@@ -95,6 +95,20 @@ func (s *Server) createCampaign(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// "Take the jobs of these campaigns": merge them into the new one.
+	moved, err := s.svc.MergeCampaignJobs(r.Context(), campaign.ID, r.Form["merge_from"])
+	if err != nil {
+		redirectQuery(w, r, "/campaigns/"+campaign.ID, "error", publicErr(err))
+
+		return
+	}
+
+	if moved > 0 {
+		redirectQuery(w, r, "/campaigns/"+campaign.ID, "notice", "Campaign created with the jobs of the chosen campaigns.")
+
+		return
+	}
+
 	http.Redirect(w, r, "/campaigns/"+campaign.ID, http.StatusSeeOther)
 }
 

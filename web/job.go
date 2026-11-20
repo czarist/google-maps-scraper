@@ -22,6 +22,8 @@ type SelectParams struct {
 	Status string
 	Limit  int
 	Offset int
+	// OldestFirst orders by creation time ascending, for the run queue.
+	OldestFirst bool
 }
 
 // JobPage contains one page of jobs and the metadata needed to navigate it.
@@ -45,6 +47,13 @@ type JobPage struct {
 	Groups []JobGroup
 	// NewJobID is the job just created, so the page can highlight it.
 	NewJobID string
+	// Filter is the campaign the home table shows: "" for all, "none" for no campaign.
+	Filter string
+	// Selected is the filtered campaign's group, for its summary line.
+	Selected *JobGroup
+	// From and To are the 1-based positions of the first and last job shown.
+	From int
+	To   int
 }
 
 // RenderedAtISO is RenderedAt in RFC 3339.

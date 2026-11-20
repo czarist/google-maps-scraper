@@ -73,9 +73,21 @@ var csvStatsCache sync.Map // path -> csvStats
 
 // jobCSVStats counts places, places with an email, and email addresses in a job's CSV.
 func (s *Service) jobCSVStats(id string) (csvStats, bool) {
+	return s.jobCSVStatsCached(id, false)
+}
+
+// jobCSVStatsCached is jobCSVStats; with final set, a cached result is trusted
+// without checking the file, because a finished job's CSV does not change.
+func (s *Service) jobCSVStatsCached(id string, final bool) (csvStats, bool) {
 	path, err := s.csvPath(id)
 	if err != nil {
 		return csvStats{}, false
+	}
+
+	if final {
+		if cached, ok := csvStatsCache.Load(path); ok {
+			return cached.(csvStats), true
+		}
 	}
 
 	info, err := os.Stat(path)
@@ -197,8 +209,13 @@ func (s *Service) ListJobGroups(ctx context.Context, newJobID string) (JobPage, 
 			}
 		}
 
-		if stats, ok := s.jobCSVStats(j.ID); ok {
-			j.WithEmail = stats.withEmail
+		// Queued jobs have no CSV yet; finished ones never change, so their
+		// cached numbers are reused without touching the disk.
+		if j.Status != StatusPending {
+			final := j.Status == StatusOK || j.Status == StatusFailed
+			if stats, ok := s.jobCSVStatsCached(j.ID, final); ok {
+				j.WithEmail = stats.withEmail
+			}
 		}
 
 		key := j.CampaignID
@@ -343,4 +360,80 @@ func (s *Service) CampaignStats(ctx context.Context, campaignID string) (Campaig
 	}
 
 	return st, nil
+}
+
+// JobTablePageSize is how many jobs one page of the home table shows.
+const JobTablePageSize = 20
+
+// ListJobTable returns one page of the home job table.
+// filter is "" for every job, noCampaignKey for jobs without a campaign, or a campaign id.
+// page starts at 1; a page past the end shows the last page.
+// When newJobID is set, the page that holds it is shown.
+func (s *Service) ListJobTable(ctx context.Context, newJobID, filter string, page int) (JobPage, error) {
+	all, err := s.ListJobGroups(ctx, newJobID)
+	if err != nil {
+		return JobPage{}, err
+	}
+
+	names := make(map[string]string, len(all.Groups))
+	for _, g := range all.Groups {
+		if g.CampaignID != "" {
+			names[g.CampaignID] = g.Name
+		}
+	}
+
+	jobs := make([]Job, 0, len(all.Jobs))
+
+	for _, j := range all.Jobs {
+		switch {
+		case filter == "":
+		case filter == noCampaignKey && j.CampaignID == "":
+		case filter == j.CampaignID:
+		default:
+			continue
+		}
+
+		if j.CampaignName == "" {
+			j.CampaignName = names[j.CampaignID]
+		}
+
+		jobs = append(jobs, j)
+	}
+
+	for i := range all.Groups {
+		g := &all.Groups[i]
+		if (filter == noCampaignKey && g.CampaignID == "") || (filter != "" && g.CampaignID == filter) {
+			all.Selected = g
+		}
+	}
+
+	if newJobID != "" {
+		for i := range jobs {
+			if jobs[i].ID == newJobID {
+				page = i/JobTablePageSize + 1
+			}
+		}
+	}
+
+	total := len(jobs)
+	pages := max((total+JobTablePageSize-1)/JobTablePageSize, 1)
+	page = min(max(page, 1), pages)
+
+	start := (page - 1) * JobTablePageSize
+	end := min(start+JobTablePageSize, total)
+
+	all.Jobs = jobs[start:end]
+	all.Total = total
+	all.Filter = filter
+	all.CurrentPage = page
+	all.TotalPages = pages
+	all.HasPages = pages > 1
+	all.HasPrev = page > 1
+	all.HasNext = page < pages
+	all.PrevPage = page - 1
+	all.NextPage = page + 1
+	all.From = start + 1
+	all.To = end
+
+	return all, nil
 }

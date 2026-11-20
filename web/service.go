@@ -208,23 +208,21 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return s.repo.Delete(ctx, id)
 }
 
-// DeleteMany deletes several jobs and their CSV files.
-func (s *Service) DeleteMany(ctx context.Context, ids []string) error {
-	for _, id := range ids {
-		if err := s.Delete(ctx, id); err != nil {
-			return fmt.Errorf("delete job %s: %w", id, err)
-		}
-	}
-
-	return nil
-}
-
 func (s *Service) Update(ctx context.Context, job *Job) error {
 	return s.repo.Update(ctx, job)
 }
 
 func (s *Service) SelectPending(ctx context.Context) ([]Job, error) {
 	return s.repo.Select(ctx, SelectParams{Status: StatusPending, Limit: 1})
+}
+
+// SelectPendingN returns up to n queued jobs, oldest first.
+func (s *Service) SelectPendingN(ctx context.Context, n int) ([]Job, error) {
+	if n <= 0 {
+		return nil, nil
+	}
+
+	return s.repo.Select(ctx, SelectParams{Status: StatusPending, Limit: n, OldestFirst: true})
 }
 
 // csvPath returns the on-disk path of a job's CSV output, rejecting ids that

@@ -36,13 +36,16 @@
         </nav>
     </header>
 
-    <main class="layout">
-        <section class="panel panel-form" aria-labelledby="form-title">
-            <h1 id="form-title">{{t "New campaign"}}</h1>
-            <p class="lede">{{t "A campaign groups jobs and keeps its own email settings."}}</p>
-
-            {{if .Error}}<div class="notice notice-error" role="alert">{{t .Error}}</div>{{end}}
-            {{if .Notice}}<div class="notice notice-success" role="status">{{t .Notice}}</div>{{end}}
+    <main class="layout layout-single">
+        <dialog id="campaign-dialog" class="modal" aria-labelledby="form-title">
+        <section class="panel panel-form">
+            <div class="modal-head">
+                <div>
+                    <h2 id="form-title">{{t "New campaign"}}</h2>
+                    <p class="lede">{{t "A campaign groups jobs and keeps its own email settings."}}</p>
+                </div>
+                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+            </div>
 
             <form method="post" action="/campaigns">
                 <div class="field">
@@ -56,17 +59,40 @@
                     </select>
                     <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
                 </div>
+                {{if .Campaigns}}
+                <fieldset class="merge-from">
+                    <legend>{{t "Take the jobs of these campaigns"}} <span class="optional">({{t "optional"}})</span></legend>
+                    <p class="hint">{{t "The jobs move to the new campaign. The old campaigns stay, with their email settings and history."}}</p>
+                    <div class="merge-list">
+                        {{range .Campaigns}}{{if .JobCount}}
+                        <label class="check">
+                            <input type="checkbox" name="merge_from" value="{{.ID}}">
+                            <span>{{.Name}} <small>{{t "%d jobs" .JobCount}}</small></span>
+                        </label>
+                        {{end}}{{end}}
+                    </div>
+                </fieldset>
+                {{end}}
                 <div class="submit-row">
                     <button type="submit" class="btn-primary">{{t "Create campaign"}}</button>
                 </div>
             </form>
         </section>
+        </dialog>
 
         <div class="layout-stack">
             <section class="panel" aria-labelledby="list-title">
-                <div class="jobs-head">
-                    <h2 id="list-title">{{t "Campaigns"}}</h2>
+                <div class="page-head">
+                    <div>
+                        <h1 id="list-title">{{t "Campaigns"}}</h1>
+                        <p class="lede">{{t "A campaign groups jobs and keeps its own email settings."}}</p>
+                    </div>
+                    <button type="button" class="btn-primary" data-open-dialog="campaign-dialog">+ {{t "New campaign"}}</button>
                 </div>
+
+                {{if .Error}}<div class="notice notice-error" role="alert">{{t .Error}}</div>{{end}}
+                {{if .Notice}}<div class="notice notice-success" role="status">{{t .Notice}}</div>{{end}}
+
                 <div class="table-wrap">
                     <table>
                         <thead>
@@ -89,7 +115,7 @@
                             </tr>
                             {{else}}
                             <tr class="empty-row">
-                                <td colspan="5">{{t "No campaigns yet. Create one with the form."}}</td>
+                                <td colspan="5">{{t "No campaigns yet. Create one with the New campaign button."}}</td>
                             </tr>
                             {{end}}
                         </tbody>
@@ -98,10 +124,13 @@
             </section>
 
             <section class="panel" id="services" aria-labelledby="services-title">
-                <div class="jobs-head">
-                    <h2 id="services-title">{{t "Services"}}</h2>
+                <div class="page-head">
+                    <div>
+                        <h2 id="services-title">{{t "Services"}}</h2>
+                        <p class="hint">{{t "Each campaign sends as one service. Unsubscribes apply per service."}}</p>
+                    </div>
+                    <button type="button" class="btn-quiet" data-open-dialog="service-dialog">+ {{t "New service"}}</button>
                 </div>
-                <p class="hint">{{t "Each campaign sends as one service. Unsubscribes apply per service."}}</p>
                 <ul class="service-list">
                     {{range .Services}}
                     <li class="service-item">
@@ -127,9 +156,17 @@
                     {{end}}
                 </ul>
 
-                <div class="service-new-box">
-                    <h3 id="new-service-title">{{t "New service"}}</h3>
-                    <p class="hint">{{t "Register a service that already exists on the unsubscribe site. The name is checked there and cannot be changed later."}}</p>
+            </section>
+
+            <dialog id="service-dialog" class="modal" aria-labelledby="new-service-title">
+                <section class="panel">
+                    <div class="modal-head">
+                        <div>
+                            <h2 id="new-service-title">{{t "New service"}}</h2>
+                            <p class="lede">{{t "Register a service that already exists on the unsubscribe site. The name is checked there and cannot be changed later."}}</p>
+                        </div>
+                        <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                    </div>
                     <form class="service-new" method="post" action="/campaigns/services" aria-labelledby="new-service-title">
                         <div class="field">
                             <label for="service-name">{{t "Service name"}}</label>
@@ -143,8 +180,8 @@
                         </div>
                         <button type="submit" class="btn-primary">{{t "Add service"}}</button>
                     </form>
-                </div>
-            </section>
+                </section>
+            </dialog>
         </div>
     </main>
 </body>

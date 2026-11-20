@@ -164,11 +164,11 @@ func TestGetJobsPollsAndGroupsJobs(t *testing.T) {
 	}
 
 	for _, want := range []string{
-		`hx-trigger="every 10s"`,
+		`hx-trigger="every 10s [!document.hidden]"`,
 		`hx-delete="/delete?id=00000000-0000-0000-0000-000000000001"`,
 		`hx-target="#job-groups"`,
-		`data-group="none"`,
-		"No campaign",
+		`data-campaign=""`,
+		`class="job-select"`,
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
@@ -219,9 +219,13 @@ func TestScrapeHighlightsTheNewJob(t *testing.T) {
 		t.Fatalf("scrape response must hold the job groups with the new job marked: %s", body)
 	}
 
-	// Every job is listed; the grouped list has no pages.
-	if rows := strings.Count(body, "<tr") - strings.Count(body, "<thead>"); rows != 21 {
-		t.Fatalf("got %d job rows, want 21", rows)
+	// One page of 20; the new job is on it, and the pager shows the rest.
+	if rows := strings.Count(body, "<tr") - strings.Count(body, "<thead>"); rows != JobTablePageSize {
+		t.Fatalf("got %d job rows, want %d", rows, JobTablePageSize)
+	}
+
+	if !strings.Contains(body, "1–20 of 21 jobs") || !strings.Contains(body, "Page 1 of 2") {
+		t.Fatalf("pager missing: %s", body)
 	}
 }
 
@@ -307,13 +311,27 @@ func TestJobGroupsByCampaignWithEmailNumbers(t *testing.T) {
 		t.Fatalf("stats = %+v", stats)
 	}
 
+	// Filtered by the campaign: only its job, and its numbers on top.
 	rec := httptest.NewRecorder()
-	srv.getJobs(rec, httptest.NewRequest(http.MethodGet, "/jobs", http.NoBody))
+	srv.getJobs(rec, httptest.NewRequest(http.MethodGet, "/jobs?list_campaign="+full.ID, http.NoBody))
+	body := rec.Body.String()
 
-	for _, want := range []string{`href="/campaigns/` + full.ID + `">Configure</a>`, "1 emails sent", "1 failed", "2 with email"} {
-		if !strings.Contains(rec.Body.String(), want) {
-			t.Fatalf("home list missing %q", want)
+	for _, want := range []string{`href="/campaigns/` + full.ID + `">Configure campaign</a>`, "<dt>Emails sent</dt><dd>1</dd>", "<dt>Failed</dt><dd>1</dd>", "<dt>With email</dt><dd>2</dd>", "escolas"} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("filtered list missing %q: %s", want, body)
 		}
+	}
+
+	if strings.Contains(body, "avulsa") {
+		t.Fatal("filtered list shows a job from outside the campaign")
+	}
+
+	// Jobs without a campaign.
+	rec = httptest.NewRecorder()
+	srv.getJobs(rec, httptest.NewRequest(http.MethodGet, "/jobs?list_campaign=none", http.NoBody))
+
+	if body := rec.Body.String(); !strings.Contains(body, "avulsa") || strings.Contains(body, ">escolas<") {
+		t.Fatalf("no-campaign filter wrong: %s", body)
 	}
 }
 

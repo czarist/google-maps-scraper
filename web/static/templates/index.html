@@ -15,7 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body hx-boost="true">
-    <a class="skip-link" href="#name">{{t "Skip to the form"}}</a>
+    <a class="skip-link" href="#jobs-title">{{t "Skip to the jobs"}}</a>
 
     <header class="topbar">
         <div class="brand">
@@ -37,13 +37,21 @@
         </nav>
     </header>
 
-    <main class="layout">
-        <section class="panel panel-form" aria-labelledby="form-title">
-            <h1 id="form-title">{{t "New job"}}</h1>
-            <p class="lede">{{t "Each job searches Google Maps and builds a CSV of the businesses it finds."}}</p>
+    <main class="layout layout-single">
+        <dialog id="job-dialog" class="modal" aria-labelledby="form-title">
+        <section class="panel panel-form">
+            <div class="modal-head">
+                <div>
+                    <h2 id="form-title">{{t "New job"}}</h2>
+                    <p class="lede">{{t "Each job searches Google Maps and builds a CSV of the businesses it finds."}}</p>
+                </div>
+                <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+            </div>
 
             <form id="scrape-form"
                   hx-post="/scrape"
+                  hx-request='{"timeout": 120000}'
+                  hx-sync="this:drop"
                   hx-target="#job-groups"
                   hx-swap="outerHTML"
                   novalidate>
@@ -93,6 +101,7 @@
                     <p class="hint" id="repeat-hint">{{t `Creates one job per city with the same settings. Write only what you are looking for (e.g. cosmetics) or "cosmetics, porto alegre": the city is replaced by each one on the list.`}}</p>
                 </div>
 
+                <div class="form-row">
                 <div class="field field-narrow">
                     <label for="lang">{{t "Results language"}}</label>
                     <input type="text" id="lang" name="lang" value="{{.Language}}"
@@ -116,6 +125,7 @@
                         {{end}}
                     </select>
                     <p class="hint">{{t "Optional. Group this job under a campaign."}} <a href="/campaigns">{{t "Manage campaigns"}}</a></p>
+                </div>
                 </div>
 
                 <details class="advanced" id="advanced">
@@ -214,18 +224,51 @@
                 <div id="form-status" class="notice notice-success" role="status" aria-live="polite"></div>
             </form>
         </section>
+        </dialog>
 
         <section class="panel panel-jobs" aria-labelledby="jobs-title">
-            <div class="jobs-head">
-                <h2 id="jobs-title">{{t "Campaigns and jobs"}}</h2>
-                <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
+            <div class="page-head">
+                <div>
+                    <h1 id="jobs-title">{{t "Jobs"}}</h1>
+                    <p class="jobs-summary" id="jobs-summary" aria-live="polite"></p>
+                </div>
+                <button type="button" class="btn-primary" id="open-job-dialog">+ {{t "New job"}}</button>
             </div>
+            <div class="toolbar">
+                <label for="list-campaign">{{t "Campaign"}}</label>
+                <select id="list-campaign">
+                    <option value="">{{t "All jobs"}}</option>
+                    {{range .Campaigns}}
+                    <option value="{{.ID}}"{{if eq .ID $.ListCampaign}} selected{{end}}>{{.Name}}</option>
+                    {{end}}
+                    <option value="none"{{if eq "none" .ListCampaign}} selected{{end}}>{{t "No campaign"}}</option>
+                </select>
+            </div>
+            <div id="list-status" class="notice notice-success" role="status" aria-live="polite"></div>
             <div class="bulk-bar" id="bulk-bar" hidden>
-                <span id="bulk-count" aria-live="polite"></span>
-                <button type="button" class="btn-quiet" id="bulk-clear">{{t "Clear selection"}}</button>
-                <button type="button" class="btn-danger" id="bulk-delete">{{t "Delete selected"}}</button>
+                <div class="bulk-info">
+                    <span id="bulk-count" aria-live="polite"></span>
+                    <button type="button" class="link-button" id="bulk-all" hidden></button>
+                </div>
+                <div class="bulk-move">
+                    <label for="bulk-target" class="visually-hidden">{{t "Move to campaign"}}</label>
+                    <select id="bulk-target">
+                        <option value="">{{t "Move to campaign…"}}</option>
+                        {{range .Campaigns}}
+                        <option value="{{.ID}}">{{.Name}}</option>
+                        {{end}}
+                        <option value="none">{{t "No campaign"}}</option>
+                        <option value="new">+ {{t "New campaign…"}}</option>
+                    </select>
+                    <input type="text" id="bulk-new-name" maxlength="200" autocomplete="off" placeholder="{{t "New campaign name"}}" aria-label="{{t "New campaign name"}}" hidden>
+                    <button type="button" class="btn-quiet" id="bulk-move">{{t "Move"}}</button>
+                </div>
+                <div class="bulk-actions">
+                    <button type="button" class="btn-quiet" id="bulk-clear">{{t "Clear selection"}}</button>
+                    <button type="button" class="btn-danger" id="bulk-delete">{{t "Delete selected"}}</button>
+                </div>
             </div>
-            <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML">
+            <div id="job-groups" class="job-groups" hx-get="/jobs" hx-trigger="load" hx-swap="outerHTML" data-campaign="{{.ListCampaign}}" data-page="1">
                 <p class="group-empty">{{t "Loading jobs…"}}</p>
             </div>
 
@@ -476,6 +519,15 @@ function hideSponsor() {
         setBusy(true);
     });
 
+    // A request that times out or never reaches the server must free the button.
+    ['htmx:timeout', 'htmx:sendError'].forEach(function (name) {
+        form.addEventListener(name, function (e) {
+            if (e.target !== form) return;
+            setBusy(false);
+            showError({{t "Could not reach the server. Check that the scraper is running and try again."}});
+        });
+    });
+
     form.addEventListener('htmx:afterRequest', function (e) {
         if (e.target !== form) return;
         setBusy(false);
@@ -484,9 +536,13 @@ function hideSponsor() {
         if (e.detail.successful) {
             var name = field('name').value.trim();
             var created = repeatCount();
-            statusBox.textContent = created > 1
-                ? {{t "{0} jobs created, one per city. They run one after another."}}.replace('{0}', created)
+            var done = created > 1
+                ? {{t "{0} jobs created, one per city. Several run at the same time."}}.replace('{0}', created)
                 : {{t `Job "{0}" created. It is at the top of the list.`}}.replace('{0}', name);
+            var listStatus = document.getElementById('list-status');
+            if (listStatus) listStatus.textContent = done;
+            var dlg = document.getElementById('job-dialog');
+            if (dlg && dlg.open) dlg.close();
             // htmx 1.9 swaps before afterRequest, so the new rows are already in place.
             // The server marks the new row and opens its campaign.
             var row = document.querySelector('#job-groups tr.is-new');
@@ -624,20 +680,109 @@ function hideSponsor() {
         try { localStorage.setItem(openKey, JSON.stringify(saved)); } catch (err) {}
     }, true);
 
+    // New job modal.
+    var jobDialog = document.getElementById('job-dialog');
+    var openJobBtn = document.getElementById('open-job-dialog');
+    if (jobDialog && openJobBtn) {
+        openJobBtn.addEventListener('click', function () {
+            var ls = document.getElementById('list-status');
+            if (ls) ls.textContent = '';
+            // Preselect the campaign being viewed.
+            var filter = document.getElementById('list-campaign');
+            var camp = document.getElementById('campaign_id');
+            if (filter && camp && filter.value && filter.value !== 'none') camp.value = filter.value;
+            jobDialog.showModal();
+            var nameInput = document.getElementById('name');
+            if (nameInput) nameInput.focus();
+        });
+        jobDialog.addEventListener('click', function (e) {
+            // A click on the backdrop or the close button closes the modal.
+            if (e.target === jobDialog || (e.target.closest && e.target.closest('[data-close-dialog]'))) jobDialog.close();
+        });
+    }
+
+    // Campaign filter and page travel with every request that redraws the table,
+    // so the 3s refresh, deletes and new jobs keep the current view.
+    document.body.addEventListener('htmx:configRequest', function (e) {
+        var list = document.getElementById('job-groups');
+        if (!list) return;
+        var target = e.detail.target;
+        if (!target || target.id !== 'job-groups') return;
+        var p = e.detail.parameters;
+        if (p.list_campaign === undefined) p.list_campaign = list.getAttribute('data-campaign') || '';
+        if (p.list_page === undefined) p.list_page = list.getAttribute('data-page') || '1';
+    });
+
+    var listFilter = document.getElementById('list-campaign');
+    if (listFilter) {
+        listFilter.addEventListener('change', function () {
+            selectedJobs = {};
+            allInFilter = false;
+            refreshBulkBar();
+            htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: { list_campaign: listFilter.value, list_page: '1' } });
+        });
+    }
+
     // Selecting several jobs to delete at once. The list refreshes every few
     // seconds, so the selection lives here and is re-applied after each refresh.
     var selectedJobs = {};
+    // allInFilter: the action applies to every job of the current filter, on all pages.
+    var allInFilter = false;
 
     function selectedIDs() { return Object.keys(selectedJobs); }
+
+    function filterTotal() {
+        var list = document.getElementById('job-groups');
+        return list ? parseInt(list.getAttribute('data-total'), 10) || 0 : 0;
+    }
+
+    function selectionCount() { return allInFilter ? filterTotal() : selectedIDs().length; }
 
     function refreshBulkBar() {
         var bar = document.getElementById('bulk-bar');
         if (!bar) return;
-        var n = selectedIDs().length;
+        var n = selectionCount();
         bar.hidden = n === 0;
-        document.getElementById('bulk-count').textContent = n === 1
-            ? {{t "1 job selected"}}
-            : {{t "{0} jobs selected"}}.replace('{0}', n);
+        document.getElementById('bulk-count').textContent = allInFilter
+            ? {{t "All {0} jobs of this view are selected"}}.replace('{0}', n)
+            : (n === 1 ? {{t "1 job selected"}} : {{t "{0} jobs selected"}}.replace('{0}', n));
+
+        // Offer every job of the view when the whole page is ticked and there are more pages.
+        var all = document.getElementById('bulk-all');
+        var pageBoxes = document.querySelectorAll('#job-groups input.job-select');
+        var pageTicked = pageBoxes.length > 0 && document.querySelectorAll('#job-groups input.job-select:checked').length === pageBoxes.length;
+        var total = filterTotal();
+        if (allInFilter) {
+            all.hidden = false;
+            all.textContent = {{t "Select only this page"}};
+        } else if (pageTicked && total > pageBoxes.length) {
+            all.hidden = false;
+            all.textContent = {{t "Select all {0} jobs of this view"}}.replace('{0}', total);
+        } else {
+            all.hidden = true;
+        }
+    }
+
+    // What a bulk action sends: the ticked ids, or the whole view.
+    function bulkValues() {
+        return allInFilter ? { scope: 'filter' } : { ids: selectedIDs().join(',') };
+    }
+
+    function clearSelection() {
+        selectedJobs = {};
+        allInFilter = false;
+        var list = document.getElementById('job-groups');
+        if (list) restoreSelection(list);
+        refreshBulkBar();
+    }
+
+    var bulkTarget = document.getElementById('bulk-target');
+    if (bulkTarget) {
+        bulkTarget.addEventListener('change', function () {
+            var name = document.getElementById('bulk-new-name');
+            name.hidden = bulkTarget.value !== 'new';
+            if (!name.hidden) name.focus();
+        });
     }
 
     function syncGroupBoxes(list) {
@@ -655,7 +800,7 @@ function hideSponsor() {
         var present = {};
         list.querySelectorAll('input.job-select').forEach(function (box) {
             present[box.value] = true;
-            box.checked = !!selectedJobs[box.value];
+            box.checked = allInFilter || !!selectedJobs[box.value];
         });
         // Forget jobs that are gone (deleted elsewhere).
         selectedIDs().forEach(function (id) { if (!present[id]) delete selectedJobs[id]; });
@@ -667,7 +812,9 @@ function hideSponsor() {
         var t = e.target;
         if (t.matches && t.matches('input.job-select')) {
             if (t.checked) selectedJobs[t.value] = true; else delete selectedJobs[t.value];
+            if (!t.checked) allInFilter = false;
         } else if (t.matches && t.matches('input.select-group')) {
+            if (!t.checked) allInFilter = false;
             t.closest('table').querySelectorAll('input.job-select').forEach(function (box) {
                 box.checked = t.checked;
                 if (t.checked) selectedJobs[box.value] = true; else delete selectedJobs[box.value];
@@ -683,17 +830,32 @@ function hideSponsor() {
     document.addEventListener('click', function (e) {
         if (!e.target.closest) return;
         if (e.target.closest('#bulk-clear')) {
-            selectedJobs = {};
-            var list = document.getElementById('job-groups');
-            if (list) restoreSelection(list);
-        } else if (e.target.closest('#bulk-delete')) {
-            var ids = selectedIDs();
-            if (ids.length === 0) return;
-            var msg = {{t "Delete {0} jobs and their CSV files? This cannot be undone."}}.replace('{0}', ids.length);
-            if (!window.confirm(msg)) return;
-            selectedJobs = {};
+            clearSelection();
+        } else if (e.target.closest('#bulk-all')) {
+            allInFilter = !allInFilter;
             refreshBulkBar();
-            htmx.ajax('POST', '/jobs/delete', { target: '#job-groups', swap: 'outerHTML', values: { ids: ids.join(',') } });
+        } else if (e.target.closest('#bulk-delete')) {
+            var n = selectionCount();
+            if (n === 0) return;
+            var msg = {{t "Delete {0} jobs and their CSV files? This cannot be undone."}}.replace('{0}', n);
+            if (!window.confirm(msg)) return;
+            var values = bulkValues();
+            clearSelection();
+            htmx.ajax('POST', '/jobs/delete', { target: '#job-groups', swap: 'outerHTML', values: values });
+        } else if (e.target.closest('#bulk-move')) {
+            var target = document.getElementById('bulk-target').value;
+            if (!target || selectionCount() === 0) return;
+            var payload = bulkValues();
+            payload.target = target;
+            if (target === 'new') {
+                var newName = document.getElementById('bulk-new-name').value.trim();
+                if (!newName) { document.getElementById('bulk-new-name').focus(); return; }
+                payload.new_campaign_name = newName;
+            }
+            clearSelection();
+            document.getElementById('bulk-target').value = '';
+            document.getElementById('bulk-new-name').hidden = true;
+            htmx.ajax('POST', '/jobs/campaign', { target: '#job-groups', swap: 'outerHTML', values: payload });
         }
     });
 

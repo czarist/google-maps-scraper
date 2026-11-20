@@ -83,7 +83,7 @@ func TestJobRowsShowRunActivity(t *testing.T) {
 
 	body := rec.Body.String()
 	for _, want := range []string{
-		`hx-trigger="every 3s"`,
+		`hx-trigger="every 3s [!document.hidden]"`,
 		`data-running="1"`,
 		`<strong class="run-count">4</strong> places found`,
 		`data-started="2026-01-02T03:04:05Z"`,

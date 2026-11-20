@@ -38,6 +38,9 @@ services:
     build: .
     image: gmaps-local
     restart: unless-stopped
+    # Several jobs run in parallel, each with its own headless Chromium. Chromium
+    # keeps page memory in /dev/shm; Docker's 64MB default makes tabs crash.
+    shm_size: "2gb"
     develop:
       watch:
         - action: rebuild

@@ -97,3 +97,38 @@
         }
     });
 }());
+
+// Modals: a button with data-open-dialog="<dialog id>" opens it; a click on the
+// backdrop or on [data-close-dialog] closes it. Bound once on document, so it
+// keeps working after hx-boost swaps the page body.
+(function () {
+    if (window.__gmsDialogs) {
+        return;
+    }
+    window.__gmsDialogs = true;
+
+    document.addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t || !t.closest) {
+            return;
+        }
+
+        var opener = t.closest('[data-open-dialog]');
+        if (opener) {
+            var dlg = document.getElementById(opener.getAttribute('data-open-dialog'));
+            if (dlg && typeof dlg.showModal === 'function' && !dlg.open) {
+                dlg.showModal();
+                var first = dlg.querySelector('input:not([type=hidden]), select, textarea');
+                if (first) {
+                    first.focus();
+                }
+            }
+            return;
+        }
+
+        var open = t.closest('dialog.modal[open]');
+        if (open && (t === open || t.closest('[data-close-dialog]'))) {
+            open.close();
+        }
+    });
+}());

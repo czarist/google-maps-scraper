@@ -36,10 +36,20 @@
         </nav>
     </header>
 
-    <main class="layout layout-campaign">
-        <section class="panel panel-form" aria-labelledby="mail-title">
-            <h1 id="mail-title">{{t "Email dispatch"}}</h1>
-            <p class="lede">{{t "These settings are used only for %s." .Campaign.Name}}</p>
+
+    <main class="layout layout-single layout-wide">
+        <section class="panel campaign-head" aria-labelledby="campaign-title">
+            <div class="page-head">
+                <div>
+                    <p class="eyebrow"><a href="/campaigns">{{t "Campaigns"}}</a> /</p>
+                    <h1 id="campaign-title">{{.Campaign.Name}}</h1>
+                    <p class="lede">{{t "Service"}}: <code>{{.Campaign.ServiceName}}</code></p>
+                </div>
+                <div class="page-actions">
+                    <a class="btn-quiet" href="/?campaign={{.Campaign.ID}}">{{t "See jobs"}}</a>
+                    <button type="button" class="btn-quiet" data-open-dialog="campaign-edit-dialog">{{t "Edit campaign"}}</button>
+                </div>
+            </div>
 
             {{if .Error}}<div class="notice notice-error" role="alert">{{t .Error}}</div>{{end}}
             {{if .Notice}}<div class="notice notice-success" role="status">{{t .Notice}}</div>{{end}}
@@ -49,6 +59,79 @@
                  hx-select-oob="#live-running,#live-stats,#live-jobs,#live-dispatch-info,#live-dispatch-button,#live-history,#live-sends,#live-poller"
                  hx-swap="none"></div>
 
+            <div class="stats-grid" id="live-stats" aria-label="{{t "Campaign numbers"}}">
+                <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label">{{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label">{{t "places found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label">{{t "places with email"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label">{{t "email addresses found"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label">{{t "waiting to be sent"}}</span></div>
+                <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label">{{t "accepted by the SMTP server"}}</span></div>
+                <div class="stat{{if .Stats.SendFailed}} stat-bad{{end}}"><span class="stat-value">{{.Stats.SendFailed}}</span><span class="stat-label">{{t "failed to send"}}</span></div>
+                <div class="stat"><span class="stat-value">{{.Stats.Dispatches}}</span><span class="stat-label">{{t "dispatch runs"}}{{if .Stats.LastSentLabel}} · {{t "last send %s UTC" .Stats.LastSentLabel}}{{end}}</span></div>
+            </div>
+            <p class="hint">{{t "Accepted means the SMTP server took the message. Bounces and inbox delivery are not tracked."}}</p>
+        </section>
+
+        <nav class="tabs" role="tablist" aria-label="{{t "Campaign sections"}}">
+            <a href="#jobs" role="tab" data-tab="jobs">{{t "Jobs"}}</a>
+            <a href="#email" role="tab" data-tab="email">{{t "Email"}}</a>
+            <a href="#send" role="tab" data-tab="send">{{t "Send"}}</a>
+            <a href="#history" role="tab" data-tab="history">{{t "History"}}</a>
+        </nav>
+
+        <section class="panel tab-panel" id="tab-jobs" data-panel="jobs" role="tabpanel">
+            <h2>{{t "Jobs"}}</h2>
+            <div class="table-wrap" id="live-jobs">
+                <table>
+                    <thead>
+                        <tr>
+                            <th scope="col">{{t "Job"}}</th>
+                            <th scope="col">{{t "Status"}}</th>
+                            <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {{range .Jobs}}
+                        <tr>
+                            <td data-label="{{t "Job"}}">{{.Name}}</td>
+                            <td data-label="{{t "Status"}}"><span class="status status-{{.Status}}">{{if eq .Status "ok"}}{{t "Completed"}}{{else if eq .Status "pending"}}{{t "Queued"}}{{else if eq .Status "working"}}{{t "Running"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</span></td>
+                            <td class="actions">
+                                <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/remove">
+                                    <input type="hidden" name="job_id" value="{{.ID}}">
+                                    <button type="submit" class="btn-quiet">{{t "Remove"}}</button>
+                                </form>
+                            </td>
+                        </tr>
+                        {{else}}
+                        <tr class="empty-row"><td colspan="3">{{t "No jobs in this campaign yet."}}</td></tr>
+                        {{end}}
+                    </tbody>
+                </table>
+            </div>
+
+            {{if .Available}}
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/jobs">
+                <div class="field">
+                    <label for="job_id">{{t "Add an existing job"}}</label>
+                    <select id="job_id" name="job_id">
+                        {{range .Available}}
+                        <option value="{{.ID}}">{{.Name}}{{if .CampaignName}} ({{t "moves from %s" .CampaignName}}){{end}}</option>
+                        {{end}}
+                    </select>
+                    <p class="hint">{{t "A job can belong to one campaign. Adding it here removes it from the other one."}}</p>
+                </div>
+                <button type="submit" class="btn-primary">{{t "Add job"}}</button>
+            </form>
+            {{else}}
+            <p class="hint">{{t "Every job is already in this campaign, or there are no jobs yet. Create a job and choose this campaign."}}</p>
+            {{end}}
+        </section>
+
+        <section class="panel tab-panel" id="tab-email" data-panel="email" role="tabpanel" aria-labelledby="mail-title">
+            <div class="email-grid">
+                <div>
+                    <h2 id="mail-title">{{t "Email dispatch"}}</h2>
+                    <p class="lede">{{t "These settings are used only for %s." .Campaign.Name}}</p>
             <form id="mail-form" method="post" action="/campaigns/{{.Campaign.ID}}/mail" data-id="{{.Campaign.ID}}">
                 <fieldset>
                     <legend>{{t "SMTP server"}}</legend>
@@ -136,94 +219,18 @@
                 </div>
                 <noscript><p class="hint">{{t "Upload, preview, and the connection test need JavaScript. You can still paste the message and save."}}</p></noscript>
             </form>
-        </section>
-
-        <section class="panel" aria-labelledby="campaign-title">
-            <h2 id="preview-title">{{t "Preview"}}</h2>
+                </div>
+                <aside class="email-preview" aria-labelledby="preview-title">
+                    <h2 id="preview-title">{{t "Preview"}}</h2>
             <p class="hint" id="preview-subject">{{t "Sample business data. Nothing is sent until you use Send test or Send emails."}}</p>
             <pre id="preview-text" class="mail-preview-text" hidden></pre>
             <iframe id="preview-frame" class="mail-preview" sandbox title="{{t "Email preview"}}" hidden></iframe>
-
-            <div class="jobs-head">
-                <h2 id="campaign-title">{{.Campaign.Name}}</h2>
+                </aside>
             </div>
+        </section>
 
-            <div class="stats-grid" id="live-stats" aria-label="{{t "Campaign numbers"}}">
-                <div class="stat"><span class="stat-value">{{.Stats.Jobs}}</span><span class="stat-label">{{t "jobs"}}{{if .Stats.Running}} · {{t "%d running" .Stats.Running}}{{end}}{{if .Stats.Queued}} · {{t "%d queued" .Stats.Queued}}{{end}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Places}}</span><span class="stat-label">{{t "places found"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.WithEmail}}</span><span class="stat-label">{{t "places with email"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Addresses}}</span><span class="stat-label">{{t "email addresses found"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Preview.Ready}}</span><span class="stat-label">{{t "waiting to be sent"}}</span></div>
-                <div class="stat stat-ok"><span class="stat-value">{{.Stats.Sent}}</span><span class="stat-label">{{t "accepted by the SMTP server"}}</span></div>
-                <div class="stat{{if .Stats.SendFailed}} stat-bad{{end}}"><span class="stat-value">{{.Stats.SendFailed}}</span><span class="stat-label">{{t "failed to send"}}</span></div>
-                <div class="stat"><span class="stat-value">{{.Stats.Dispatches}}</span><span class="stat-label">{{t "dispatch runs"}}{{if .Stats.LastSentLabel}} · {{t "last send %s UTC" .Stats.LastSentLabel}}{{end}}</span></div>
-            </div>
-            <p class="hint">{{t "Accepted means the SMTP server took the message. Bounces and inbox delivery are not tracked."}}</p>
-
-            <form method="post" action="/campaigns/{{.Campaign.ID}}/rename">
-                <div class="field">
-                    <label for="rename">{{t "Campaign name"}}</label>
-                    <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
-                </div>
-                <div class="field">
-                    <label for="campaign-service">{{t "Service"}} · <a href="/campaigns#services">{{t "Manage services"}}</a></label>
-                    <select id="campaign-service" name="servico" required>
-                        {{range .Services}}<option value="{{.Name}}"{{if eq .Name $.Campaign.ServiceName}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
-                    </select>
-                    <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
-                </div>
-                <div class="submit-row">
-                    <button type="submit" class="btn-quiet">{{t "Save"}}</button>
-                </div>
-            </form>
-
-            <h3>{{t "Jobs"}}</h3>
-            <div class="table-wrap" id="live-jobs">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">{{t "Job"}}</th>
-                            <th scope="col">{{t "Status"}}</th>
-                            <th scope="col"><span class="visually-hidden">{{t "Actions"}}</span></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {{range .Jobs}}
-                        <tr>
-                            <td data-label="{{t "Job"}}">{{.Name}}</td>
-                            <td data-label="{{t "Status"}}"><span class="status status-{{.Status}}">{{if eq .Status "ok"}}{{t "Completed"}}{{else if eq .Status "pending"}}{{t "Queued"}}{{else if eq .Status "working"}}{{t "Running"}}{{else if eq .Status "failed"}}{{t "Failed"}}{{else}}{{.Status}}{{end}}</span></td>
-                            <td class="actions">
-                                <form class="form-inline" method="post" action="/campaigns/{{$.Campaign.ID}}/jobs/remove">
-                                    <input type="hidden" name="job_id" value="{{.ID}}">
-                                    <button type="submit" class="btn-quiet">{{t "Remove"}}</button>
-                                </form>
-                            </td>
-                        </tr>
-                        {{else}}
-                        <tr class="empty-row"><td colspan="3">{{t "No jobs in this campaign yet."}}</td></tr>
-                        {{end}}
-                    </tbody>
-                </table>
-            </div>
-
-            {{if .Available}}
-            <form method="post" action="/campaigns/{{.Campaign.ID}}/jobs">
-                <div class="field">
-                    <label for="job_id">{{t "Add an existing job"}}</label>
-                    <select id="job_id" name="job_id">
-                        {{range .Available}}
-                        <option value="{{.ID}}">{{.Name}}{{if .CampaignName}} ({{t "moves from %s" .CampaignName}}){{end}}</option>
-                        {{end}}
-                    </select>
-                    <p class="hint">{{t "A job can belong to one campaign. Adding it here removes it from the other one."}}</p>
-                </div>
-                <button type="submit" class="btn-primary">{{t "Add job"}}</button>
-            </form>
-            {{else}}
-            <p class="hint">{{t "Every job is already in this campaign, or there are no jobs yet. Create a job and choose this campaign."}}</p>
-            {{end}}
-
-            <h3>{{t "Dispatch"}}</h3>
+        <section class="panel tab-panel" id="tab-send" data-panel="send" role="tabpanel">
+            <h2>{{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
             <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, 10 at a time, with a pause between messages and a longer pause between batches."}}</p>
@@ -271,6 +278,8 @@
                 </div>
             </form>
 
+            <div class="danger-zone">
+                <h2>{{t "Delete campaign"}}</h2>
             <div class="campaign-delete">
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/delete" hx-confirm="{{t "Delete this campaign? Jobs and their CSV files stay. Email settings and send history for this campaign are removed."}}">
                     <button type="submit" class="btn-danger">{{t "Delete campaign, keep jobs"}}</button>
@@ -282,9 +291,10 @@
                 </form>
                 {{end}}
             </div>
+            </div>
         </section>
 
-        <section class="panel panel-history" aria-labelledby="history-title">
+        <section class="panel tab-panel" id="tab-history" data-panel="history" role="tabpanel" aria-labelledby="history-title">
             <h2 id="history-title">{{t "History"}}</h2>
             <div class="table-wrap" id="live-history">
                 <table class="history-list">
@@ -345,8 +355,68 @@
             </div>
             </div>
         </section>
+
+        <dialog id="campaign-edit-dialog" class="modal" aria-labelledby="edit-title">
+            <section class="panel">
+                <div class="modal-head">
+                    <h2 id="edit-title">{{t "Edit campaign"}}</h2>
+                    <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}">&times;</button>
+                </div>
+            <form method="post" action="/campaigns/{{.Campaign.ID}}/rename">
+                <div class="field">
+                    <label for="rename">{{t "Campaign name"}}</label>
+                    <input type="text" id="rename" name="name" value="{{.Campaign.Name}}" required maxlength="200" autocomplete="off">
+                </div>
+                <div class="field">
+                    <label for="campaign-service">{{t "Service"}} · <a href="/campaigns#services">{{t "Manage services"}}</a></label>
+                    <select id="campaign-service" name="servico" required>
+                        {{range .Services}}<option value="{{.Name}}"{{if eq .Name $.Campaign.ServiceName}} selected{{end}}>{{.Label}} ({{.Name}})</option>{{end}}
+                    </select>
+                    <p class="hint">{{t "Recipients who unsubscribed from this service are skipped. Every email carries the unsubscribe link of this service."}}</p>
+                </div>
+                <div class="submit-row">
+                    <button type="submit" class="btn-primary">{{t "Save"}}</button>
+                </div>
+            </form>
+            </section>
+        </dialog>
     </main>
     <script>
+    // Tabs: the hash picks the tab; without one, the last tab used on this page.
+    (function () {
+        var key = 'gms-campaign-tab';
+        var tabs = document.querySelectorAll('.tabs [data-tab]');
+        if (!tabs.length) return;
+
+        function show(name) {
+            var found = false;
+            tabs.forEach(function (t) { if (t.getAttribute('data-tab') === name) found = true; });
+            if (!found) name = 'jobs';
+            tabs.forEach(function (t) {
+                var on = t.getAttribute('data-tab') === name;
+                t.setAttribute('aria-selected', on ? 'true' : 'false');
+                t.classList.toggle('is-active', on);
+            });
+            document.querySelectorAll('.tab-panel').forEach(function (p) {
+                p.hidden = p.getAttribute('data-panel') !== name;
+            });
+            try { sessionStorage.setItem(key, name); } catch (e) {}
+        }
+
+        tabs.forEach(function (t) {
+            t.addEventListener('click', function (e) {
+                e.preventDefault();
+                var name = t.getAttribute('data-tab');
+                history.replaceState(null, '', '#' + name);
+                show(name);
+            });
+        });
+
+        var start = (location.hash || '').slice(1);
+        if (!start) { try { start = sessionStorage.getItem(key) || ''; } catch (e) {} }
+        show(start || 'jobs');
+    })();
+
     (function () {
         var form = document.getElementById("mail-form");
         var file = document.getElementById("html_file");

@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gosom/google-maps-scraper/deduper"
@@ -29,9 +31,11 @@ import (
 )
 
 type webrunner struct {
-	srv       *web.Server
-	svc       *web.Service
-	cfg       *runner.Config
+	srv *web.Server
+	svc *web.Service
+	cfg *runner.Config
+	// jobCfg is cfg with the per-job browser concurrency for parallel jobs.
+	jobCfg    *runner.Config
 	mysqlDB   *sql.DB
 	optOut    *optout.Checker
 	setupMate func(context.Context, io.Writer, *web.Job) (mateRunner, error)
@@ -83,13 +87,17 @@ func New(cfg *runner.Config) (runner.Runner, error) {
 		log.Printf("saving web job results to MySQL as well as CSV")
 	}
 
+	jobCfg := *cfg
+	jobCfg.Concurrency = perJobConcurrency(cfg, jobWorkers(cfg))
+
 	ans := webrunner{
 		srv:       srv,
 		svc:       svc,
 		cfg:       cfg,
+		jobCfg:    &jobCfg,
 		mysqlDB:   mysqlDB,
 		optOut:    optOut,
-		setupMate: defaultSetupMate(cfg, mysqlDB, svc),
+		setupMate: defaultSetupMate(&jobCfg, mysqlDB, svc),
 	}
 
 	return &ans, nil
@@ -152,52 +160,131 @@ func openOptOut(svc *web.Service) (*optout.Checker, error) {
 	return checker, nil
 }
 
+// jobWorkers is how many jobs run at the same time. Each job drives its own
+// headless browser, so the default is half of the CPU threads (4 on an i7 with
+// 8 threads). WEB_JOB_WORKERS or -web-workers overrides it.
+func jobWorkers(cfg *runner.Config) int {
+	if cfg.WebJobWorkers > 0 {
+		return cfg.WebJobWorkers
+	}
+
+	return max(runtime.NumCPU()/2, 1)
+}
+
+// perJobConcurrency splits the CPU between the parallel jobs, so N jobs together
+// use about as many browser pages as there are CPU threads. An explicit -c wins.
+func perJobConcurrency(cfg *runner.Config, workers int) int {
+	if cfg.ConcurrencySet {
+		return cfg.Concurrency
+	}
+
+	return max(runtime.NumCPU()/max(workers, 1), 1)
+}
+
+// work runs queued jobs in parallel, up to jobWorkers at a time, oldest first.
+// A job that finishes frees its slot for the next one right away.
 func (w *webrunner) work(ctx context.Context) error {
+	workers := jobWorkers(w.cfg)
+	log.Printf("web runner: up to %d jobs in parallel, %d browser pages each", workers, w.jobCfg.Concurrency)
+
+	var (
+		mu       sync.Mutex
+		inflight = make(map[string]struct{}, workers)
+		wg       sync.WaitGroup
+		done     = make(chan struct{}, workers)
+	)
+
+	defer wg.Wait()
+
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
 	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-ticker.C:
-			jobs, err := w.svc.SelectPending(ctx)
+		mu.Lock()
+		free := workers - len(inflight)
+		busy := len(inflight)
+		mu.Unlock()
+
+		if free > 0 {
+			// Ask for extra rows: jobs just started may still read as pending.
+			jobs, err := w.svc.SelectPendingN(ctx, free+busy)
 			if err != nil {
+				if ctx.Err() != nil {
+					return nil
+				}
+
 				return err
 			}
 
 			for i := range jobs {
-				select {
-				case <-ctx.Done():
-					return nil
-				default:
-					t0 := time.Now().UTC()
-					if err := w.scrapeJob(ctx, &jobs[i]); err != nil {
-						params := map[string]any{
-							"job_count": len(jobs[i].Data.Keywords),
-							"duration":  time.Now().UTC().Sub(t0).String(),
-							"error":     err.Error(),
-						}
-
-						evt := tlmt.NewEvent("web_runner", params)
-
-						_ = runner.Telemetry().Send(ctx, evt)
-
-						log.Printf("error scraping job %s: %v", jobs[i].ID, err)
-					} else {
-						params := map[string]any{
-							"job_count": len(jobs[i].Data.Keywords),
-							"duration":  time.Now().UTC().Sub(t0).String(),
-						}
-
-						_ = runner.Telemetry().Send(ctx, tlmt.NewEvent("web_runner", params))
-
-						log.Printf("job %s scraped successfully", jobs[i].ID)
-					}
+				if free == 0 {
+					break
 				}
+
+				job := jobs[i]
+
+				mu.Lock()
+				if _, running := inflight[job.ID]; running {
+					mu.Unlock()
+
+					continue
+				}
+
+				inflight[job.ID] = struct{}{}
+				mu.Unlock()
+
+				free--
+
+				wg.Add(1)
+
+				go func() {
+					defer func() {
+						mu.Lock()
+						delete(inflight, job.ID)
+						mu.Unlock()
+
+						wg.Done()
+
+						select {
+						case done <- struct{}{}:
+						default:
+						}
+					}()
+
+					w.runOne(ctx, &job)
+				}()
 			}
 		}
+
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-ticker.C:
+		case <-done:
+		}
 	}
+}
+
+// runOne runs a job and reports how it went.
+func (w *webrunner) runOne(ctx context.Context, job *web.Job) {
+	t0 := time.Now().UTC()
+
+	err := w.scrapeJob(ctx, job)
+
+	params := map[string]any{
+		"job_count": len(job.Data.Keywords),
+		"duration":  time.Now().UTC().Sub(t0).String(),
+	}
+
+	if err != nil {
+		params["error"] = err.Error()
+
+		log.Printf("error scraping job %s: %v", job.ID, err)
+	} else {
+		log.Printf("job %s scraped successfully", job.ID)
+	}
+
+	_ = runner.Telemetry().Send(ctx, tlmt.NewEvent("web_runner", params))
 }
 
 func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {

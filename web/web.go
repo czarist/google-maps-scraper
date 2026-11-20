@@ -74,6 +74,7 @@ func New(svc *Service, addr string) (*Server, error) {
 	})
 	mux.HandleFunc("/jobs", ans.getJobs)
 	mux.HandleFunc("/jobs/delete", ans.deleteMany)
+	mux.HandleFunc("/jobs/campaign", ans.moveJobs)
 	mux.HandleFunc("/campaigns", ans.campaigns)
 	mux.HandleFunc("/campaigns/{id}", ans.campaign)
 	mux.HandleFunc("/campaigns/services", ans.serviceCreate)
@@ -221,6 +222,8 @@ type formData struct {
 	// ProxyScrape is true when PROXYSCRAPE_API_KEY is set.
 	ProxyScrape bool
 	Campaigns   []CampaignSummary
+	// ListCampaign preselects the job table filter, from /?campaign=<id>.
+	ListCampaign string
 }
 
 type ctxKey string
@@ -301,6 +304,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data.ProxyScrape = s.svc.proxyScrape != nil
+	data.ListCampaign = strings.TrimSpace(r.URL.Query().Get("campaign"))
 
 	if err := s.execTemplate(w, r, "static/templates/index.html", data); err != nil {
 		log.Printf("render index: %v", err)
@@ -461,20 +465,13 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 	for i := range jobs {
 		// Distinct timestamps keep the cities in list order in the queue.
 		jobs[i].Date = newJob.Date.Add(time.Duration(i) * time.Millisecond)
+	}
 
-		if err := s.svc.Create(r.Context(), &jobs[i]); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+	// One transaction for all of them: thousands of cities stay instant.
+	if err := s.svc.CreateJobs(r.Context(), jobs, campaignID); err != nil {
+		http.Error(w, publicErr(err), http.StatusInternalServerError)
 
-			return
-		}
-
-		if campaignID != "" {
-			if err := s.svc.AssignJob(r.Context(), campaignID, jobs[i].ID); err != nil {
-				http.Error(w, publicErr(err), http.StatusInternalServerError)
-
-				return
-			}
-		}
+		return
 	}
 
 	if err := s.renderJobGroups(r, w, jobs[0].ID); err != nil {
@@ -485,7 +482,9 @@ func (s *Server) scrape(w http.ResponseWriter, r *http.Request) {
 // renderJobGroups writes the home page job list, grouped by campaign.
 // newJobID highlights a job that was just created.
 func (s *Server) renderJobGroups(r *http.Request, w io.Writer, newJobID string) error {
-	groups, err := s.svc.ListJobGroups(r.Context(), newJobID)
+	page, _ := strconv.Atoi(r.FormValue("list_page"))
+
+	groups, err := s.svc.ListJobTable(r.Context(), newJobID, strings.TrimSpace(r.FormValue("list_campaign")), page)
 	if err != nil {
 		return fmt.Errorf("list jobs: %w", err)
 	}
@@ -580,7 +579,31 @@ func (s *Server) delete(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// deleteMany deletes several jobs at once. POST /jobs/delete with ids=<id>,<id>,...
+// selectedJobIDs reads the jobs a bulk action applies to: ids=<id>,<id>,... or,
+// with scope=filter, every job of the table filter list_campaign (all pages).
+func (s *Server) selectedJobIDs(r *http.Request) ([]string, error) {
+	if r.FormValue("scope") == "filter" {
+		return s.svc.JobIDsInFilter(r.Context(), strings.TrimSpace(r.FormValue("list_campaign")))
+	}
+
+	var ids []string
+
+	for _, v := range r.Form["ids"] {
+		for _, id := range strings.Split(v, ",") {
+			if id = strings.TrimSpace(id); id != "" {
+				if _, err := uuid.Parse(id); err != nil {
+					return nil, errors.New("Invalid ID")
+				}
+
+				ids = append(ids, id)
+			}
+		}
+	}
+
+	return ids, nil
+}
+
+// deleteMany deletes several jobs at once. POST /jobs/delete with ids=... or scope=filter.
 func (s *Server) deleteMany(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
@@ -594,20 +617,11 @@ func (s *Server) deleteMany(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ids []string
+	ids, err := s.selectedJobIDs(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
 
-	for _, v := range r.Form["ids"] {
-		for _, id := range strings.Split(v, ",") {
-			if id = strings.TrimSpace(id); id != "" {
-				if _, err := uuid.Parse(id); err != nil {
-					http.Error(w, "Invalid ID", http.StatusUnprocessableEntity)
-
-					return
-				}
-
-				ids = append(ids, id)
-			}
-		}
+		return
 	}
 
 	if len(ids) == 0 {
@@ -620,6 +634,78 @@ func (s *Server) deleteMany(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 
 		return
+	}
+
+	if err := s.renderJobGroups(r, w, ""); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// moveJobs changes the campaign of several jobs at once. POST /jobs/campaign
+// with ids=... or scope=filter, and either target=<campaign id>, target=none
+// (no campaign), or target=new with new_campaign_name (and optional servico).
+// A new campaign is answered with HX-Refresh so every campaign list on the page updates.
+func (s *Server) moveJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	ids, err := s.selectedJobIDs(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if len(ids) == 0 {
+		http.Error(w, "no jobs selected", http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	target := strings.TrimSpace(r.FormValue("target"))
+	created := false
+
+	switch target {
+	case "":
+		http.Error(w, "choose a campaign", http.StatusUnprocessableEntity)
+
+		return
+	case noCampaignKey:
+		target = ""
+	case "new":
+		target, err = s.svc.CreateCampaignNamed(r.Context(), r.FormValue("new_campaign_name"), r.FormValue("servico"))
+		if err != nil {
+			http.Error(w, publicErr(err), http.StatusUnprocessableEntity)
+
+			return
+		}
+
+		created = true
+	default:
+		if _, err := uuid.Parse(target); err != nil {
+			http.Error(w, "invalid campaign", http.StatusUnprocessableEntity)
+
+			return
+		}
+	}
+
+	if err := s.svc.MoveJobs(r.Context(), target, ids); err != nil {
+		http.Error(w, publicErr(err), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if created {
+		w.Header().Set("HX-Refresh", "true")
 	}
 
 	if err := s.renderJobGroups(r, w, ""); err != nil {

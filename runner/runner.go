@@ -9,6 +9,7 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,11 @@ type S3Uploader interface {
 }
 
 type Config struct {
-	Concurrency              int
+	Concurrency int
+	// ConcurrencySet is true when -c was given on the command line.
+	ConcurrencySet bool
+	// WebJobWorkers is how many web jobs run at the same time; 0 picks one from the CPU count.
+	WebJobWorkers            int
 	CacheDir                 string
 	MaxDepth                 int
 	InputFile                string
@@ -111,7 +116,7 @@ func ParseConfig() *Config {
 		proxiesFile string
 	)
 
-	flag.IntVar(&cfg.Concurrency, "c", min(runtime.NumCPU()/2, 1), "sets the concurrency [default: half of CPU cores]")
+	flag.IntVar(&cfg.Concurrency, "c", max(runtime.NumCPU()/2, 1), "sets the concurrency [default: half of CPU cores]")
 	flag.StringVar(&cfg.CacheDir, "cache", "cache", "sets the cache directory [no effect at the moment]")
 	flag.IntVar(&cfg.MaxDepth, "depth", 10, "maximum scroll depth in search results [default: 10]")
 	flag.StringVar(&cfg.ResultsFile, "results", "stdout", "path to the results file [default: stdout]")
@@ -144,6 +149,7 @@ func ParseConfig() *Config {
 	flag.BoolVar(&cfg.DisablePageReuse, "disable-page-reuse", false, "disable page reuse in playwright")
 	flag.BoolVar(&cfg.ExtraReviews, "extra-reviews", false, "collect anonymously available extra reviews and report collection status")
 	flag.StringVar(&cfg.LeadsDBAPIKey, "leadsdb-api-key", "", "LeadsDB API key for exporting results to LeadsDB")
+	flag.IntVar(&cfg.WebJobWorkers, "web-workers", envInt("WEB_JOB_WORKERS", 0), "web runner: jobs that run in parallel; 0 = half of the CPU threads [env: WEB_JOB_WORKERS]")
 	flag.StringVar(&cfg.MySQLDSN, "mysql-dsn", os.Getenv("MYSQL_DSN"), "MySQL DSN to also save web runner results, e.g. user:pass@tcp(host:3306)/db [env: MYSQL_DSN]")
 	flag.BoolVar(&cfg.Resume, "resume", false, "resume a CLI file scrape by reading existing results and appending missing places")
 	flag.StringVar(&cfg.GridBBox, "grid-bbox", "", "bounding box for grid scraping: 'minLat,minLon,maxLat,maxLon' (e.g. '40.30,-3.80,40.50,-3.60')")
@@ -154,6 +160,12 @@ func ParseConfig() *Config {
 	flag.BoolVar(&cfg.Version, "version", false, "returns the version of the tool")
 
 	flag.Parse()
+
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "c" {
+			cfg.ConcurrencySet = true
+		}
+	})
 
 	if cfg.Version {
 		info, ok := debug.ReadBuildInfo()
@@ -362,4 +374,14 @@ func Banner() {
 	message3 := "💖 Consider sponsoring to support development: https://github.com/sponsors/gosom"
 
 	fmt.Fprintln(os.Stderr, banner([]string{message1, message2, message3}, 0))
+}
+
+// envInt reads an integer environment variable, or returns def when it is unset or invalid.
+func envInt(name string, def int) int {
+	v, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+	if err != nil {
+		return def
+	}
+
+	return v
 }

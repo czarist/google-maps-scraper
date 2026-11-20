@@ -90,7 +90,11 @@ func (repo *repo) Select(ctx context.Context, params web.SelectParams) ([]web.Jo
 		args = append(args, params.Status)
 	}
 
-	q += " ORDER BY created_at DESC, id DESC"
+	if params.OldestFirst {
+		q += " ORDER BY created_at ASC, id ASC"
+	} else {
+		q += " ORDER BY created_at DESC, id DESC"
+	}
 
 	if params.Limit > 0 {
 		q += " LIMIT ?"
