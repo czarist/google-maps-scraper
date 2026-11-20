@@ -135,6 +135,22 @@ func TestJobTableOrderStatusFilterAndRetry(t *testing.T) {
 	if err := svc.RetryJob(ctx, "job-0"); !errors.Is(err, web.ErrJobNotFailed) {
 		t.Fatalf("retry of a completed job: %v", err)
 	}
+
+	// Run all failed again: only job-4 is still failed.
+	before, err := svc.ListJobTable(ctx, "", "", "", "", 1)
+	if err != nil || before.FailedCount != 1 {
+		t.Fatalf("failed count before: %d, %v", before.FailedCount, err)
+	}
+
+	n, err := svc.RetryFailedJobs(ctx, "")
+	if err != nil || n != 1 {
+		t.Fatalf("RetryFailedJobs = %d, %v; want 1", n, err)
+	}
+
+	after, err := svc.ListJobTable(ctx, "", "", "", "", 1)
+	if err != nil || after.FailedCount != 0 {
+		t.Fatalf("failed count after: %d, %v", after.FailedCount, err)
+	}
 }
 
 func TestBackupKeepsACopyOfTheDatabase(t *testing.T) {

@@ -2803,3 +2803,8 @@ dialog.modal-sm {
     background: var(--pin-ink);
     border-color: var(--pin-ink);
 }
+
+/* Toolbar button pushed to the right end. */
+.toolbar .toolbar-end {
+    margin-left: auto;
+}

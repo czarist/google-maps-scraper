@@ -79,6 +79,7 @@ func New(svc *Service, addr string) (*Server, error) {
 
 		ans.retryJob(w, r)
 	})
+	mux.HandleFunc("/jobs/retry-failed", ans.retryFailedJobs)
 	mux.HandleFunc("/jobs/campaign", ans.moveJobs)
 	mux.HandleFunc("/campaigns", ans.campaigns)
 	mux.HandleFunc("/campaigns/{id}", ans.campaign)
@@ -651,6 +652,32 @@ func (s *Server) retryJob(w http.ResponseWriter, r *http.Request) {
 		}
 
 		http.Error(w, trFrom(r, publicJobErr(err)), code)
+
+		return
+	}
+
+	if err := s.renderJobGroups(r, w, ""); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// retryFailedJobs queues every failed job of the table's campaign filter again
+// and redraws the table. POST /jobs/retry-failed (list_campaign)
+func (s *Server) retryFailedJobs(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, methodNotAllowedMessage, http.StatusMethodNotAllowed)
+
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+
+		return
+	}
+
+	if _, err := s.svc.RetryFailedJobs(r.Context(), strings.TrimSpace(r.FormValue("list_campaign"))); err != nil {
+		http.Error(w, trFrom(r, publicJobErr(err)), http.StatusInternalServerError)
 
 		return
 	}

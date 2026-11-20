@@ -55,6 +55,12 @@ func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJ
 		return JobPage{}, err
 	}
 
+	// Failed jobs of the campaign filter, for "Run all failed jobs again".
+	_, failedCount, err := store.JobTablePage(ctx, filter, StatusFailed, "", 0, 0)
+	if err != nil {
+		return JobPage{}, err
+	}
+
 	start := (page - 1) * JobTablePageSize
 
 	out := JobPage{
@@ -63,6 +69,7 @@ func (s *Service) listJobTableSQL(ctx context.Context, store jobTableStore, newJ
 		Filter:      filter,
 		Order:       order,
 		Status:      status,
+		FailedCount: failedCount,
 		NewJobID:    newJobID,
 		RenderedAt:  time.Now().UTC(),
 		Running:     counts[StatusWorking],

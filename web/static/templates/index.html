@@ -261,6 +261,9 @@
                     <option value="working">{{t "Only running"}}</option>
                     <option value="pending">{{t "Only queued"}}</option>
                 </select>
+                <button type="button" class="btn-quiet toolbar-end" id="retry-failed" hidden>
+                    <i class="fas fa-rotate-right" aria-hidden="true"></i> <span id="retry-failed-label"></span>
+                </button>
             </div>
             <div id="list-status" class="notice notice-success" role="status" aria-live="polite"></div>
             <div class="bulk-bar" id="bulk-bar" hidden>
@@ -759,6 +762,37 @@ function hideSponsor() {
             list.setAttribute('data-page', '1');
         }
         htmx.ajax('GET', '/jobs', { target: '#job-groups', swap: 'outerHTML', values: values });
+    }
+
+    // "Run all failed jobs again": shown while the current campaign filter has
+    // failed jobs; the count comes from the list after every refresh.
+    var retryFailed = document.getElementById('retry-failed');
+
+    function failedInView() {
+        var list = document.getElementById('job-groups');
+        return list ? parseInt(list.getAttribute('data-failed') || '0', 10) || 0 : 0;
+    }
+
+    function refreshRetryFailed() {
+        if (!retryFailed) return;
+        var n = failedInView();
+        retryFailed.hidden = n === 0;
+        document.getElementById('retry-failed-label').textContent =
+            {{t "Run all {0} failed jobs again"}}.replace('{0}', n);
+    }
+
+    if (retryFailed) {
+        document.body.addEventListener('htmx:afterSettle', refreshRetryFailed);
+        retryFailed.addEventListener('click', function () {
+            var n = failedInView();
+            if (n === 0) return;
+            window.gmsConfirm({{t "Run the {0} failed jobs again? They go back to the queue and start over."}}.replace('{0}', n),
+                { title: {{t "Run failed jobs again?"}}, okLabel: {{t "Run again"}} }).then(function (yes) {
+                if (!yes) return;
+                htmx.ajax('POST', '/jobs/retry-failed', { target: '#job-groups', swap: 'outerHTML', values: { list_page: '1' } });
+            });
+        });
+        refreshRetryFailed();
     }
 
     if (listFilter) listFilter.addEventListener('change', function () { reloadJobList(true); });

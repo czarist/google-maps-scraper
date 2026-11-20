@@ -53,6 +53,8 @@ type JobPage struct {
 	Order string
 	// Status limits the list to one job status; "" shows every job.
 	Status string
+	// FailedCount is how many jobs of the campaign filter failed (any status filter).
+	FailedCount int
 	// Selected is the filtered campaign's group, for its summary line.
 	Selected *JobGroup
 	// From and To are the 1-based positions of the first and last job shown.

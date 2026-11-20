@@ -26,6 +26,33 @@ func (s *Service) RetryJob(ctx context.Context, id string) error {
 	return s.Update(ctx, &job)
 }
 
+// RetryFailedJobs queues every failed job of a campaign filter again ("" for
+// all jobs, noCampaignKey for jobs without a campaign, or a campaign id). It
+// returns how many jobs went back to the queue.
+func (s *Service) RetryFailedJobs(ctx context.Context, filter string) (int, error) {
+	ids, err := s.JobIDsInFilter(ctx, filter, StatusFailed)
+	if err != nil {
+		return 0, err
+	}
+
+	n := 0
+
+	for _, id := range ids {
+		err := s.RetryJob(ctx, id)
+		if errors.Is(err, ErrJobNotFailed) {
+			continue // it changed since the list was read
+		}
+
+		if err != nil {
+			return n, err
+		}
+
+		n++
+	}
+
+	return n, nil
+}
+
 // ValidJobStatusFilter reports whether status is a job list status filter:
 // "" for every job, or one job status.
 func ValidJobStatusFilter(status string) bool {

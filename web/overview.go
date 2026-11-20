@@ -446,6 +446,10 @@ func (s *Service) listJobTableInMemory(ctx context.Context, newJobID, filter, st
 			continue
 		}
 
+		if j.Status == StatusFailed {
+			all.FailedCount++
+		}
+
 		if !matchesStatus(status, j.Status) {
 			continue
 		}
