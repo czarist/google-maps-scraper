@@ -230,6 +230,14 @@ func (o *jsFetch) shutdown() {
 		close(o.closed)
 	}
 
+	// Drop the local ports before the browser teardown. Closing Chromium can
+	// sit until its timeout, and the worker then starts the next job. The
+	// listeners have to be gone before that, or they pile up in LISTEN until
+	// the ephemeral range is full.
+	if o.proxyPool != nil {
+		_ = o.proxyPool.Close()
+	}
+
 	closeWithTimeout(func() error {
 		o.closeBrowsers()
 

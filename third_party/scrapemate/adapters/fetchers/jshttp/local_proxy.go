@@ -16,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -112,6 +113,40 @@ func releaseConnectSlotFor(upstreamHost string) {
 	}
 }
 
+// maxProcessListeners is the ceiling on local proxy ports for the whole
+// process. The ephemeral range is about 28k ports and every outbound dial
+// shares it, including SMTP. A job binds at most maxListeningProxies (32).
+// 1024 covers a large worker count with one generation of pools still
+// closing, and still leaves the rest of the range for those dials. Past the
+// ceiling, new jobs fail instead of repeating the port exhaustion.
+var (
+	liveListeners       atomic.Int32
+	maxProcessListeners atomic.Int32
+)
+
+func init() {
+	maxProcessListeners.Store(1024)
+}
+
+func acquireListenerSlot() error {
+	for {
+		n := liveListeners.Load()
+		limit := maxProcessListeners.Load()
+
+		if n >= limit {
+			return fmt.Errorf("refusing to bind a local proxy port: %d already open (cap %d)", n, limit)
+		}
+
+		if liveListeners.CompareAndSwap(n, n+1) {
+			return nil
+		}
+	}
+}
+
+func releaseListenerSlot() {
+	liveListeners.Add(-1)
+}
+
 type ProxyType int
 
 const (
@@ -121,6 +156,7 @@ const (
 
 type AuthProxy struct {
 	server     *http.Server
+	listener   net.Listener
 	port       int
 	upstream   *url.URL
 	auth       string
@@ -202,8 +238,10 @@ func createSOCKS5ProxyClient(upstream *url.URL, auth *proxy.Auth) *http.Client {
 	}
 }
 
-// StartAuthProxy starts an HTTP proxy that authenticates against an upstream proxy (HTTP or SOCKS5)
-func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
+// prepareAuthProxy builds an upstream dial target. It does not bind a local
+// port: failover dials these directly, and only proxies handed to a browser
+// need a listener.
+func prepareAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
 	if proxyURL == "" {
 		return nil, fmt.Errorf("proxy URL cannot be empty")
 	}
@@ -213,7 +251,7 @@ func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
 
 	upstreamURL, err := url.Parse(proxyURL)
 	if err != nil {
-		return nil, fmt.Errorf("invalid proxy URL: %v", err)
+		return nil, fmt.Errorf("invalid proxy URL: %w", err)
 	}
 
 	var proxyType ProxyType
@@ -264,24 +302,59 @@ func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
 		},
 	}
 
-	listener, err := net.Listen("tcp", "localhost:0")
+	return authProxy, nil
+}
+
+// StartAuthProxy starts an HTTP proxy that authenticates against an upstream proxy (HTTP or SOCKS5).
+func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
+	authProxy, err := prepareAuthProxy(proxyURL, username, password)
 	if err != nil {
-		return nil, fmt.Errorf("failed to find free port: %v", err)
+		return nil, err
 	}
 
-	authProxy.port = listener.Addr().(*net.TCPAddr).Port //nolint:errcheck // always ok
+	if err := authProxy.listen(); err != nil {
+		_ = authProxy.Close()
+
+		return nil, err
+	}
+
+	return authProxy, nil
+}
+
+// listen binds one local port and serves the browser-facing proxy. The
+// listener is closed from Close even when Serve has not registered it yet:
+// http.Server.Shutdown returns immediately in that window and leaves the
+// port bound.
+func (p *AuthProxy) listen() error {
+	if p.listener != nil {
+		return nil
+	}
+
+	if err := acquireListenerSlot(); err != nil {
+		return err
+	}
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		releaseListenerSlot()
+
+		return fmt.Errorf("failed to find free port: %w", err)
+	}
+
+	p.listener = listener
+	p.port = listener.Addr().(*net.TCPAddr).Port //nolint:errcheck // always ok
 
 	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.Body = http.MaxBytesReader(w, r.Body, 10<<20) // 10MB max
 
 		if r.Method == http.MethodConnect {
-			authProxy.handleConnect(w, r)
+			p.handleConnect(w, r)
 		} else {
-			authProxy.handleHTTP(w, r)
+			p.handleHTTP(w, r)
 		}
 	})
 
-	authProxy.server = &http.Server{
+	p.server = &http.Server{
 		Handler:        handler,
 		ReadTimeout:    60 * time.Second,
 		WriteTimeout:   60 * time.Second,
@@ -290,12 +363,13 @@ func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
 	}
 
 	go func() {
-		if err := authProxy.server.Serve(listener); err != nil && err != http.ErrServerClosed {
-			authProxy.logger.Printf("Server error: %v", err)
+		err := p.server.Serve(listener)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) && !isExpectedNetworkError(err) {
+			p.logger.Printf("Server error: %v", err)
 		}
 	}()
 
-	return authProxy, nil
+	return nil
 }
 
 func (p *AuthProxy) handleHTTP(w http.ResponseWriter, r *http.Request) {
@@ -937,14 +1011,26 @@ func (p *AuthProxy) Close() error {
 	var err error
 
 	p.once.Do(func() {
-		close(p.shutdownCh)
+		if p.shutdownCh != nil {
+			close(p.shutdownCh)
+		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
+		// Close the socket first. Shutdown waits on a server whose Serve has
+		// not run yet, reports success, and the port stays in LISTEN.
+		if p.listener != nil {
+			err = p.listener.Close()
+			p.listener = nil
 
-		err = p.server.Shutdown(ctx)
-		if err == context.DeadlineExceeded {
-			err = p.server.Close()
+			releaseListenerSlot()
+		}
+
+		if p.server != nil {
+			// server.Close closes the same socket once Serve has registered
+			// it. That second close is expected.
+			cerr := p.server.Close()
+			if err == nil && cerr != nil && !isExpectedNetworkError(cerr) {
+				err = cerr
+			}
 		}
 	})
 

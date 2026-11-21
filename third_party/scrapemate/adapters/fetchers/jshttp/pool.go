@@ -2,14 +2,28 @@ package jshttp
 
 import (
 	"fmt"
+	"math/rand/v2"
 	"net/url"
 	"sync"
 )
 
+// maxListeningProxies is how many local ports one job may bind.
+//
+// A browser is pinned to one local listener. When that exit rejects a
+// CONNECT, the same listener dials other upstreams directly, so the rest of
+// the list does not need a socket. Binding every ProxyScrape exit (up to
+// 1000) per job fills the ephemeral range, about 28k ports. After that,
+// listen on 127.0.0.1:0 fails with "address already in use" and every
+// outbound dial, including SMTP, fails with "cannot assign requested address".
+// A second ceiling, maxProcessListeners, stops a leaked pool from growing
+// without bound across jobs.
+const maxListeningProxies = 32
+
 type ProxyPool struct {
-	current int
-	mu      *sync.Mutex
-	proxies []*AuthProxy
+	current   int
+	mu        *sync.Mutex
+	proxies   []*AuthProxy // every upstream, including dial-only failover targets
+	listening []*AuthProxy // the ones with a local port, handed to browsers
 }
 
 func NewProxyPool(proxies []string) (*ProxyPool, error) {
@@ -22,15 +36,24 @@ func NewProxyPool(proxies []string) (*ProxyPool, error) {
 		proxies: make([]*AuthProxy, 0, len(proxies)),
 	}
 
+	// Any failure, including a panic while binding, has to drop the ports
+	// already taken. Otherwise they stay in LISTEN for the life of the process.
+	started := false
+	defer func() {
+		if !started {
+			_ = pool.Close()
+		}
+	}()
+
 	for _, p := range proxies {
 		cfg, err := parseProxy(p)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse proxy %s: %w", p, err)
+			return nil, fmt.Errorf("failed to parse proxy %s: %w", redactProxyURL(p), err)
 		}
 
-		authProxy, err := StartAuthProxy(cfg.u, cfg.username, cfg.password)
+		authProxy, err := prepareAuthProxy(cfg.u, cfg.username, cfg.password)
 		if err != nil {
-			return nil, fmt.Errorf("failed to start auth proxy for %s: %w", p, err)
+			return nil, fmt.Errorf("failed to prepare auth proxy for %s: %w", redactProxyURL(p), err)
 		}
 
 		authProxy.pool = pool
@@ -38,14 +61,52 @@ func NewProxyPool(proxies []string) (*ProxyPool, error) {
 		pool.proxies = append(pool.proxies, authProxy)
 	}
 
+	// Spread the listeners through the list so parallel jobs are not all
+	// pinned to the same first exits.
+	start := 0
+	if len(pool.proxies) > 1 {
+		start = rand.IntN(len(pool.proxies))
+	}
+
+	n := min(len(pool.proxies), maxListeningProxies)
+	for i := range n {
+		authProxy := pool.proxies[(start+i)%len(pool.proxies)]
+		if err := authProxy.listen(); err != nil {
+			return nil, fmt.Errorf("failed to start auth proxy for %s: %w", redactProxyURL(proxies[(start+i)%len(proxies)]), err)
+		}
+
+		pool.listening = append(pool.listening, authProxy)
+	}
+
+	started = true
+
 	return pool, nil
+}
+
+// redactProxyURL drops userinfo so a bind failure does not land credentials in the job error.
+func redactProxyURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil || u.Host == "" {
+		return "invalid-proxy-url"
+	}
+
+	u.User = nil
+
+	return u.String()
 }
 
 func (pp *ProxyPool) Next() *AuthProxy {
 	pp.mu.Lock()
 	defer pp.mu.Unlock()
 
-	p := pp.proxies[pp.current%len(pp.proxies)]
+	list := pp.listening
+	if len(list) == 0 {
+		// Pools built in tests pin a listener on every entry and leave
+		// listening empty. A browser must never receive a dial-only proxy.
+		list = pp.proxies
+	}
+
+	p := list[pp.current%len(list)]
 	pp.current++
 
 	return p
@@ -76,6 +137,26 @@ func (pp *ProxyPool) Alternates(exclude *AuthProxy, n int) []*AuthProxy {
 	}
 
 	return out
+}
+
+// Close shuts down every local listener in the pool. Dial-only entries have
+// nothing bound. Without this, each job leaks its listeners for the life of
+// the process and outbound dials eventually fail with
+// "cannot assign requested address".
+func (pp *ProxyPool) Close() error {
+	pp.mu.Lock()
+	proxies := pp.proxies
+	pp.mu.Unlock()
+
+	var firstErr error
+
+	for _, p := range proxies {
+		if err := p.Close(); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+
+	return firstErr
 }
 
 type proxyConfig struct {

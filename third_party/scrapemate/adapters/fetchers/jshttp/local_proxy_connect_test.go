@@ -288,6 +288,53 @@ func TestConnectFailoverOnNonRateLimit(t *testing.T) {
 	}
 }
 
+func TestConnectFailoverUsesDialOnlyAlternate(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	var hitsB atomic.Int32
+
+	addrA := serveConnectUpstream(t, func(c net.Conn, _ *http.Request) {
+		fmt.Fprintf(c, "HTTP/1.1 502 Bad Gateway\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+		c.Close()
+	})
+
+	addrB := serveConnectUpstream(t, func(c net.Conn, _ *http.Request) {
+		hitsB.Add(1)
+		_, _ = io.WriteString(c, "HTTP/1.1 200 Connection Established\r\n\r\n")
+		c.Close()
+	})
+
+	pinned, err := StartAuthProxy("http://"+addrA, "user", "secret")
+	if err != nil {
+		t.Fatalf("start pinned proxy: %v", err)
+	}
+
+	t.Cleanup(func() { _ = pinned.Close() })
+
+	alt, err := prepareAuthProxy("http://"+addrB, "user", "secret")
+	if err != nil {
+		t.Fatalf("prepare alternate: %v", err)
+	}
+
+	if alt.Port() != 0 {
+		t.Fatalf("dial-only alternate is listening on %d", alt.Port())
+	}
+
+	pool := &ProxyPool{mu: &sync.Mutex{}, proxies: []*AuthProxy{pinned, alt}}
+	pinned.pool = pool
+	alt.pool = pool
+
+	resp := connectThrough(t, pinned.Address())
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("local proxy status = %d, want 200 from the dial-only exit", resp.StatusCode)
+	}
+
+	if hitsB.Load() != 1 {
+		t.Fatalf("dial-only exit dialed %d times, want 1", hitsB.Load())
+	}
+}
+
 func TestConnectWhilePausedDoesNotDial(t *testing.T) {
 	resetUpstreamRateLimit()
 	t.Cleanup(resetUpstreamRateLimit)
