@@ -165,6 +165,53 @@ func TestFailedJobIsQueuedAgainAfterTheOthers(t *testing.T) {
 	}
 }
 
+func TestRequeueFailedPutsJobsBack(t *testing.T) {
+	repo := &memoryJobRepo{}
+	svc := web.NewService(repo, t.TempDir())
+	ctx := context.Background()
+
+	failed := web.Job{
+		ID: "job-f", Name: "f", Date: time.Now().UTC(), Status: web.StatusFailed,
+		Data: web.JobData{
+			Keywords: []string{"x"},
+			Run:      web.JobRun{Attempts: web.MaxJobAttempts, Error: "no working proxies"},
+		},
+	}
+	empty := web.Job{
+		ID: "job-e", Name: "e", Date: time.Now().UTC(), Status: web.StatusFailed,
+		Data: web.JobData{Run: web.JobRun{Attempts: 1, Error: "no keywords"}},
+	}
+
+	for _, job := range []web.Job{failed, empty} {
+		if err := svc.Create(ctx, &job); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	n, err := svc.RequeueFailedRuns(ctx)
+	if err != nil || n != 1 {
+		t.Fatalf("requeued %d, %v; want 1", n, err)
+	}
+
+	got, err := svc.Get(ctx, failed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if got.Status != web.StatusPending || got.Data.Run.Attempts != web.MaxJobAttempts {
+		t.Fatalf("failed job after requeue: status %q attempts %d", got.Status, got.Data.Run.Attempts)
+	}
+
+	kept, err := svc.Get(ctx, empty.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if kept.Status != web.StatusFailed {
+		t.Fatalf("job with no search = %q, want failed", kept.Status)
+	}
+}
+
 func TestRestartRequeuesJobsLeftRunning(t *testing.T) {
 	repo := &memoryJobRepo{}
 	svc := web.NewService(repo, t.TempDir())

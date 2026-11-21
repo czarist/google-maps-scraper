@@ -200,6 +200,9 @@ type ScrapeMate struct {
 // Start starts the scraper
 func (s *ScrapeMate) Start() error {
 	s.log.Info("starting scrapemate")
+	// A zero lastActivityAt is years in the past, so the first stats tick
+	// treated a search that had not finished yet as already idle and stopped it.
+	s.stats.touch()
 
 	defer func() {
 		close(s.results)
@@ -607,6 +610,12 @@ type stats struct {
 	numOfJobsCompleted int64
 	numOfJobsFailed    int64
 	lastActivityAt     time.Time
+}
+
+func (o *stats) touch() {
+	o.l.Lock()
+	o.lastActivityAt = time.Now().UTC()
+	o.l.Unlock()
 }
 
 func (o *stats) getStats() (completed, failed int64, lastActivityAt time.Time) {

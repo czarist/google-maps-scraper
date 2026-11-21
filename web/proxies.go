@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gosom/scrapemate"
+	"github.com/gosom/scrapemate/adapters/fetchers/jshttp"
 	"golang.org/x/time/rate"
 )
 
@@ -76,6 +77,10 @@ func (s *Service) SavedProxies() ([]string, error) {
 // ErrNoProxies stops a job that would otherwise reach Google with the server's own IP.
 var ErrNoProxies = errors.New("no working proxies: the job was not started so your IP is not exposed to Google. Check the ProxyScrape plan")
 
+// ErrProxyCooling means the proxy gateway answered 429. The proxies are still
+// usable; the account needs a short pause. The job goes back to the queue.
+var ErrProxyCooling = errors.New("proxy rate limit: too many requests, the job waits and goes back to the queue")
+
 // DefaultProxies returns the proxies new jobs use: the ProxyScrape account's
 // proxies when PROXYSCRAPE_API_KEY is set, otherwise the saved pool.
 // With ProxyScrape there is no fallback: if the API fails or has no online
@@ -91,6 +96,13 @@ func (s *Service) DefaultProxies(ctx context.Context) ([]string, error) {
 // since - rather than being stuck replaying the same list every retry.
 func (s *Service) RefreshProxies(ctx context.Context) ([]string, error) {
 	return s.accountProxies(ctx, true)
+}
+
+// AccountProxies returns the current plan's proxies. A list fetched in the
+// last proxyScrapeCacheTTL is reused so a wave of jobs does not trip the
+// account API's rate limit. This call does not touch the proxy gateway.
+func (s *Service) AccountProxies(ctx context.Context) ([]string, error) {
+	return s.accountProxies(ctx, false)
 }
 
 func (s *Service) accountProxies(ctx context.Context, refresh bool) ([]string, error) {
@@ -153,6 +165,11 @@ func (s *Service) JobProxies(ctx context.Context, proxies []string) ([]string, e
 		switch h, ok := proxyHealthOf(p, now); {
 		case !ok:
 			unknown = append(unknown, p)
+		case proxyTextRateLimited(h.err):
+			// A cached 429 is not a dead exit. Treating it as one made every
+			// later job fail with "tested 0 proxies" until the cache expired.
+			proxyHealth.Delete(p)
+			unknown = append(unknown, p)
 		case h.ok:
 			good = append(good, p)
 		default:
@@ -160,21 +177,56 @@ func (s *Service) JobProxies(ctx context.Context, proxies []string) ([]string, e
 		}
 	}
 
-	// Test the unknown ones in a random order, a sample at a time.
+	// Test the unknown ones in a random order, one at a time, and stop at the
+	// first rate limit. A 429 from this gateway applies to the whole account,
+	// so testing the rest of the sample only makes the window longer. It is
+	// not a dead exit: those proxies stay in the rotation.
 	rand.Shuffle(len(unknown), func(a, b int) { unknown[a], unknown[b] = unknown[b], unknown[a] })
 
 	sample := unknown[:min(len(unknown), proxyPreflightSample)]
-	untested := unknown[len(sample):]
+	untested := append([]string{}, unknown[len(sample):]...)
 
-	testedOK := 0
+	rateLimited := proxyCoolingWait() > 0
+	testedN := 0
 
-	for _, r := range TestProxies(ctx, sample) {
-		proxyHealth.Store(r.Proxy, proxyHealthEntry{ok: r.OK, err: r.Error, at: now})
+	if rateLimited {
+		untested = append(untested, sample...)
+	} else {
+		for i, p := range sample {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 
-		if r.OK {
-			good = append(good, r.Proxy)
-			testedOK++
-		} else {
+			if proxyCoolingWait() > 0 {
+				rateLimited = true
+				untested = append(untested, sample[i:]...)
+
+				break
+			}
+
+			testedN++
+
+			results := runProxyTests(ctx, []string{p})
+			if len(results) == 0 {
+				untested = append(untested, p)
+
+				continue
+			}
+
+			r := results[0]
+			if rememberProxyCheck(r, now) {
+				rateLimited = true
+				untested = append(untested, sample[i:]...)
+
+				break
+			}
+
+			if r.OK {
+				good = append(good, r.Proxy)
+
+				continue
+			}
+
 			lastErr = r.Error
 		}
 	}
@@ -187,16 +239,20 @@ func (s *Service) JobProxies(ctx context.Context, proxies []string) ([]string, e
 	// spread out across the pool instead of piling connections onto one IP.
 	rand.Shuffle(len(good), func(a, b int) { good[a], good[b] = good[b], good[a] })
 
-	if len(good) == 0 {
-		// The sampled proxies all failed the preflight, but there may be hundreds
-		// more in the pool that were never even tried. Give those a chance instead
-		// of failing the whole job over one unlucky (or temporarily rate-limited)
-		// sample of proxyPreflightSample proxies.
-		if len(untested) > 0 {
-			return untested, nil
-		}
+	// A 429 is the whole account. Starting the browser now only fails the
+	// navigation locally and burns the attempt. The proxies stay in rotation.
+	if rateLimited {
+		return nil, ErrProxyCooling
+	}
 
-		return nil, fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, len(sample), lastErr)
+	if len(good) == 0 && len(untested) > 0 {
+		rand.Shuffle(len(untested), func(a, b int) { untested[a], untested[b] = untested[b], untested[a] })
+
+		return untested, nil
+	}
+
+	if len(good) == 0 {
+		return nil, fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, testedN, lastErr)
 	}
 
 	// Proxies not tested yet stay in; the job's own requests will tell.
@@ -370,10 +426,81 @@ func (s *Service) RemoveSavedProxies(proxies []string) ([]string, error) {
 }
 
 // proxyTestLimiter caps how fast testProxy hits Google across every job in the
-// queue combined. Without this, a large backlog keeps freeing worker slots
-// (a failed preflight is near-instant) and firing off new tests fast enough
-// to get the whole shared proxy pool rate-limited by Google at once.
-var proxyTestLimiter = rate.NewLimiter(rate.Limit(3), 5)
+// queue combined. A burst here is what trips the gateway's account-wide 429:
+// one preflight at a time is enough to tell a dead exit from a live one.
+var proxyTestLimiter = rate.NewLimiter(rate.Every(time.Second), 1)
+
+// runProxyTests is TestProxies, replaced in tests.
+var runProxyTests = TestProxies
+
+// proxyCoolingFor is how long a 429 holds back further preflight tests.
+// The proxies stay in the rotation; only the extra checks wait.
+const proxyCoolingFor = 20 * time.Second
+
+var (
+	proxyCoolingMu    sync.Mutex
+	proxyCoolingUntil time.Time
+)
+
+// noteProxyCooling pushes the preflight pause out to now+d. A later 429 can
+// only extend it, never shorten a pause that is already running.
+func noteProxyCooling(d time.Duration) {
+	if d <= 0 {
+		d = proxyCoolingFor
+	}
+
+	until := time.Now().Add(d)
+
+	proxyCoolingMu.Lock()
+	defer proxyCoolingMu.Unlock()
+
+	if until.After(proxyCoolingUntil) {
+		proxyCoolingUntil = until
+	}
+}
+
+// proxyCoolingWait reports how long new preflight tests should wait.
+func proxyCoolingWait() time.Duration {
+	proxyCoolingMu.Lock()
+	defer proxyCoolingMu.Unlock()
+
+	return max(time.Until(proxyCoolingUntil), 0)
+}
+
+func resetProxyCooling() {
+	proxyCoolingMu.Lock()
+	proxyCoolingUntil = time.Time{}
+	proxyCoolingMu.Unlock()
+}
+
+// proxyResultRateLimited reports a gateway 429. Go's HTTP client turns a
+// rejected CONNECT into `Get "url": Too Many Requests` (the reason phrase,
+// without the status code).
+func proxyResultRateLimited(r ProxyCheck) bool {
+	return r.Status == http.StatusTooManyRequests || proxyTextRateLimited(r.Error)
+}
+
+func proxyTextRateLimited(err string) bool {
+	return strings.Contains(strings.ToLower(err), "too many requests")
+}
+
+// rememberProxyCheck stores a preflight result. A rate limit is not stored:
+// the exit still works, and caching it as dead is what made the queue fail
+// every job without testing any proxy.
+func rememberProxyCheck(r ProxyCheck, now time.Time) (rateLimited bool) {
+	if proxyResultRateLimited(r) {
+		noteProxyCooling(proxyCoolingFor)
+		// The browser proxy and the worker share this pause. A preflight 429
+		// has to hold the next job, not only the one that just tested.
+		jshttp.HoldUpstreamRateLimit(jshttp.AccountBandwidthPause)
+
+		return true
+	}
+
+	proxyHealth.Store(r.Proxy, proxyHealthEntry{ok: r.OK, err: r.Error, at: now})
+
+	return false
+}
 
 // TestProxies requests Google Maps through each proxy, in parallel.
 func TestProxies(ctx context.Context, proxies []string) []ProxyCheck {

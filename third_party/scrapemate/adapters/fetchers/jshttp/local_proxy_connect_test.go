@@ -18,6 +18,9 @@ import (
 func resetUpstreamRateLimit() {
 	rateLimitMu.Lock()
 	rateLimitUntil = time.Time{}
+	singleLaneUntil = time.Time{}
+	upstreamRecoveries = 0
+	bandwidthLimited = false
 	rateLimitMu.Unlock()
 
 	rateLimitLogMu.Lock()
@@ -158,16 +161,24 @@ func TestConnectRateLimitDoesNotFailover(t *testing.T) {
 		t.Fatalf("local proxy status = %d, want 502", resp.StatusCode)
 	}
 
-	if hitsA.Load() != 2 {
-		t.Fatalf("rate-limited exit was dialed %d times, want 2 (one retry after Retry-After)", hitsA.Load())
+	if hitsA.Load() != 1 {
+		t.Fatalf("rate-limited exit was dialed %d times, want 1 (the browser must not be held for Retry-After)", hitsA.Load())
 	}
 
 	if hitsB.Load() != 0 {
 		t.Fatalf("failover exit was dialed %d times; a 429 must not walk the pool", hitsB.Load())
 	}
 
-	if elapsed < 900*time.Millisecond {
-		t.Fatalf("retry returned in %s, want at least the Retry-After pause", elapsed)
+	if elapsed >= 800*time.Millisecond {
+		t.Fatalf("CONNECT returned in %s; a 429 must fail the socket instead of waiting out Retry-After", elapsed)
+	}
+
+	if wait := UpstreamRateLimitWait(); wait < 200*time.Millisecond || wait > 2*time.Second {
+		t.Fatalf("pause = %s, want about 1s from Retry-After", wait)
+	}
+
+	if UpstreamLaneCap(4) != 1 {
+		t.Fatalf("lane cap = %d, want 1 right after a 429", UpstreamLaneCap(4))
 	}
 
 	uaMu.Lock()
@@ -187,6 +198,26 @@ func TestConnectRateLimitDoesNotFailover(t *testing.T) {
 		if !bytes.Contains(logs.Bytes(), []byte(part)) {
 			t.Fatalf("rate-limit log %q missing %q", logged, part)
 		}
+	}
+}
+
+func TestRetryAfter120IsNotCutShort(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	resp := &http.Response{Header: make(http.Header)}
+	resp.Header.Set("Retry-After", "120")
+
+	d := retryAfterDuration(resp)
+	if d != 120*time.Second {
+		t.Fatalf("backoff = %s, want 120s", d)
+	}
+
+	noteUpstreamRateLimit(d)
+
+	wait := UpstreamRateLimitWait()
+	if wait < 110*time.Second || wait > 120*time.Second {
+		t.Fatalf("pause = %s, want about 120s", wait)
 	}
 }
 
@@ -254,5 +285,120 @@ func TestConnectFailoverOnNonRateLimit(t *testing.T) {
 
 	if hitsB.Load() != 1 {
 		t.Fatalf("second exit dialed %d times, want 1", hitsB.Load())
+	}
+}
+
+func TestConnectWhilePausedDoesNotDial(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	var hits atomic.Int32
+
+	addr := serveConnectUpstream(t, func(c net.Conn, _ *http.Request) {
+		hits.Add(1)
+		c.Close()
+	})
+
+	noteUpstreamRateLimit(2 * time.Second)
+
+	pinned := testPinnedPool(t, "http://"+addr)
+
+	start := time.Now()
+	resp := connectThrough(t, pinned.Address())
+	elapsed := time.Since(start)
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("local proxy status = %d, want 502", resp.StatusCode)
+	}
+
+	if hits.Load() != 0 {
+		t.Fatalf("upstream was dialed %d times during the pause", hits.Load())
+	}
+
+	if elapsed >= 500*time.Millisecond {
+		t.Fatalf("paused CONNECT took %s; it must fail locally", elapsed)
+	}
+}
+
+func TestBurst429DoesNotStackThePause(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	noteUpstreamRateLimit(120 * time.Second)
+	first := UpstreamRateLimitWait()
+
+	noteUpstreamRateLimit(120 * time.Second)
+	second := UpstreamRateLimitWait()
+
+	if second > first+time.Second {
+		t.Fatalf("same burst stretched the pause from %s to %s", first, second)
+	}
+
+	if second < 100*time.Second {
+		t.Fatalf("pause = %s, want about 120s", second)
+	}
+}
+
+func TestSecond429WaitsAnother120s(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	noteUpstreamRateLimit(120 * time.Second)
+
+	rateLimitMu.Lock()
+	rateLimitUntil = time.Now().Add(-time.Second)
+	rateLimitMu.Unlock()
+
+	noteUpstreamRateLimit(120 * time.Second)
+
+	got := UpstreamRateLimitWait()
+	if got < 110*time.Second || got > 120*time.Second {
+		t.Fatalf("pause = %s, want another 120s", got)
+	}
+
+	if UpstreamLaneCap(4) != 1 {
+		t.Fatal("a repeated 429 must keep a single job")
+	}
+}
+
+func TestLaneStaysNarrowAfterBandwidth429(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	if got := UpstreamLaneCap(4); got != 4 {
+		t.Fatalf("before a 429, cap = %d, want 4", got)
+	}
+
+	noteUpstreamRateLimit(time.Second)
+
+	if got := UpstreamLaneCap(4); got != 1 {
+		t.Fatalf("after a 429, cap = %d, want 1", got)
+	}
+
+	NoteUpstreamRecovered()
+
+	if got := UpstreamLaneCap(4); got != 1 {
+		t.Fatalf("after one success, cap = %d, want 1", got)
+	}
+
+	NoteUpstreamRecovered()
+
+	if got := UpstreamLaneCap(4); got != 2 {
+		t.Fatalf("after two successes, cap = %d, want 2", got)
+	}
+}
+
+func TestLaneOpensFullyWhenBandwidthWasFine(t *testing.T) {
+	resetUpstreamRateLimit()
+	t.Cleanup(resetUpstreamRateLimit)
+
+	if got := UpstreamLaneCap(4); got != 4 {
+		t.Fatalf("startup cap = %d, want 4", got)
+	}
+
+	NoteUpstreamRecovered()
+
+	if got := UpstreamLaneCap(4); got != 4 {
+		t.Fatalf("a success with no 429 changed the cap to %d", got)
 	}
 }

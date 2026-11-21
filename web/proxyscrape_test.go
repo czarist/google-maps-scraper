@@ -169,3 +169,63 @@ func TestDeadProxyLeavesTheRotation(t *testing.T) {
 		t.Fatal("dashboard count misses the bad proxy")
 	}
 }
+
+func TestRateLimitDoesNotSidelineThePool(t *testing.T) {
+	proxies := []string{"http://10.8.8.1:8080", "http://10.8.8.2:8080", "http://10.8.8.3:8080"}
+	resetProxyCooling()
+
+	t.Cleanup(func() {
+		for _, p := range proxies {
+			proxyHealth.Delete(p)
+		}
+
+		resetProxyCooling()
+
+		runProxyTests = TestProxies
+	})
+
+	// What the queue looked like after the outage: every exit cached as a 429,
+	// so the next job tested nothing and failed.
+	for _, p := range proxies {
+		proxyHealth.Store(p, proxyHealthEntry{
+			ok:  false,
+			err: `Get "https://www.google.com/maps?hl=en": Too Many Requests`,
+			at:  time.Now(),
+		})
+	}
+
+	calls := 0
+	runProxyTests = func(_ context.Context, got []string) []ProxyCheck {
+		calls++
+
+		return []ProxyCheck{{
+			Proxy: got[0],
+			Error: `Get "https://www.google.com/maps?hl=en": Too Many Requests`,
+		}}
+	}
+
+	_, err := (&Service{}).JobProxies(context.Background(), proxies)
+	if !errors.Is(err, ErrProxyCooling) {
+		t.Fatalf("rate limit error = %v, want the job to wait", err)
+	}
+
+	if calls != 1 {
+		t.Fatalf("tested %d proxies, want 1 (a 429 stops the sample)", calls)
+	}
+
+	for _, p := range proxies {
+		if h, ok := proxyHealthOf(p, time.Now()); ok && !h.ok {
+			t.Fatalf("proxy %s still cached as dead: %s", p, h.err)
+		}
+	}
+
+	// While the account is cooling, the next job waits and does not open another test.
+	calls = 0
+	if _, err := (&Service{}).JobProxies(context.Background(), proxies); !errors.Is(err, ErrProxyCooling) {
+		t.Fatalf("while cooling, error = %v, want the job to wait", err)
+	}
+
+	if calls != 0 {
+		t.Fatalf("cooling job tested %d proxies, want 0", calls)
+	}
+}

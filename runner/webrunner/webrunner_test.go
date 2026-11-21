@@ -97,7 +97,7 @@ func TestScrapeJobWithNoPlacesFails(t *testing.T) {
 		Status: web.StatusPending,
 		Data:   web.JobData{Keywords: []string{"x"}, Lang: "en", Zoom: 15, Depth: 1, MaxTime: time.Minute},
 	}
-	// The last allowed attempt: a failure now stays failed.
+	// Past the old attempt cap: a miss still goes back to the queue.
 	job.Data.Run.Attempts = web.MaxJobAttempts - 1
 
 	if err := svc.Create(context.Background(), &job); err != nil {
@@ -121,8 +121,13 @@ func TestScrapeJobWithNoPlacesFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if got.Status != web.StatusFailed || got.Data.Run.Error == "" {
-		t.Fatalf("status = %q, error = %q; want failed with a reason", got.Status, got.Data.Run.Error)
+	if got.Status != web.StatusPending || got.Data.Run.Attempts != web.MaxJobAttempts || got.Data.Run.Error == "" {
+		t.Fatalf("status = %q, attempts = %d, error = %q; want queued again with a reason",
+			got.Status, got.Data.Run.Attempts, got.Data.Run.Error)
+	}
+
+	if !got.Data.Run.RetryAfter.After(time.Now()) {
+		t.Fatal("expected the job to wait its turn at the back of the queue")
 	}
 }
 

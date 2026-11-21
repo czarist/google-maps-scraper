@@ -20,24 +20,37 @@ const (
 // retrying straight back into a pool that was just marked bad account-wide.
 const proxyRetryDelay = 2 * time.Minute
 
+// maxRetryDelay caps the wait so a job that keeps failing still comes back
+// the same day, behind whatever else is queued.
+const maxRetryDelay = 5 * time.Minute
+
 // retryDelay is how long a failed job waits before it can run again: 1 minute
-// after the first failure, 2 after the second. Other queued jobs go first.
-// A job that failed on ErrNoProxies waits at least proxyRetryDelay.
+// after the first failure, 2 after the second, and never more than maxRetryDelay.
+// Other queued jobs go first. A proxy outage waits at least proxyRetryDelay.
+// A gateway 429 waits only for the short cooling window.
 func retryDelay(attempts int, lastErr string) time.Duration {
+	if strings.Contains(lastErr, ErrProxyCooling.Error()) {
+		return proxyCoolingFor
+	}
+
 	d := time.Duration(max(attempts, 1)) * time.Minute
 
 	if strings.Contains(lastErr, ErrNoProxies.Error()) {
 		d = max(d, proxyRetryDelay)
 	}
 
+	if d > maxRetryDelay {
+		return maxRetryDelay
+	}
+
 	return d
 }
 
-// QueueRetry turns a failed run into another try at the end of the queue, unless
-// the job already used MaxJobAttempts. It reports whether the job was queued again.
-// The caller saves the job.
+// QueueRetry turns a failed run into another try at the end of the queue.
+// It reports whether the job was queued again. A job with no search text
+// stays failed: running it again cannot succeed. The caller saves the job.
 func QueueRetry(job *Job, now time.Time) bool {
-	if job.Data.Run.Attempts >= MaxJobAttempts {
+	if len(job.Data.Keywords) == 0 {
 		return false
 	}
 
@@ -72,4 +85,36 @@ func (s *Service) RequeueInterrupted(ctx context.Context) (int, error) {
 	}
 
 	return len(jobs), nil
+}
+
+// RequeueFailedRuns puts failed jobs back on the queue. A failed run is supposed
+// to wait its turn and try again; this catches jobs left failed by an older
+// process that stopped after a few attempts. The attempt count stays, so they
+// sit behind jobs that have not failed yet. A job with no search text stays
+// failed.
+func (s *Service) RequeueFailedRuns(ctx context.Context) (int, error) {
+	jobs, err := s.repo.Select(ctx, SelectParams{Status: StatusFailed})
+	if err != nil {
+		return 0, err
+	}
+
+	n := 0
+
+	for i := range jobs {
+		j := &jobs[i]
+		if len(j.Data.Keywords) == 0 {
+			continue
+		}
+
+		j.Status = StatusPending
+		j.Data.Run.RetryAfter = time.Time{}
+
+		if err := s.repo.Update(ctx, j); err != nil {
+			return n, err
+		}
+
+		n++
+	}
+
+	return n, nil
 }

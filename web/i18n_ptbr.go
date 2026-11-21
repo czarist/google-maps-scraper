@@ -71,7 +71,7 @@ var ptBR = map[string]string{
 	"Take the jobs of these campaigns":       "Trazer as tarefas destas campanhas",
 	"The jobs move to the new campaign. The old campaigns stay, with their email settings and history.": "As tarefas passam para a nova campanha. As campanhas antigas continuam, com suas configurações de email e histórico.",
 	"Campaign created with the jobs of the chosen campaigns.":                                           "Campanha criada com as tarefas das campanhas escolhidas.",
-	"Try %d of %d, after the other jobs":                                                                "Tentativa %d de %d, depois das outras tarefas",
+	"Try %d, after the other jobs":                                                                      "Tentativa %d, depois das outras tarefas",
 	"Last try: %s":                                                                                      "Última tentativa: %s",
 	"interrupted: the server restarted during the run":                                                  "interrompida: o servidor reiniciou durante a execução",
 	"stopped: the run went past its time limit and did not finish":                                      "encerrada: a execução passou do limite de tempo e não terminou",
@@ -179,9 +179,9 @@ var ptBR = map[string]string{
 	"Check the highlighted field before creating the job.":                         "Verifique o campo destacado antes de criar a tarefa.",
 	`Job "{0}" created. It is at the top of the list.`:                             `Tarefa "{0}" criada. Ela está no topo da lista.`,
 	"Could not reach the server. Check that the scraper is running and try again.": "Não foi possível acessar o servidor. Verifique se o scraper está rodando e tente novamente.",
-	"Job not created.":                                                             "Tarefa não criada.",
-	"Job not created. Server response:":                                            "Tarefa não criada. Resposta do servidor:",
-	"error":                                                                        "erro",
+	"Job not created.":                  "Tarefa não criada.",
+	"Job not created. Server response:": "Tarefa não criada. Resposta do servidor:",
+	"error":                             "erro",
 
 	// Job list
 	"Created (UTC)":                 "Criada (UTC)",

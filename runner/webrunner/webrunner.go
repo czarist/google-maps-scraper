@@ -25,6 +25,7 @@ import (
 	"github.com/gosom/google-maps-scraper/web"
 	"github.com/gosom/google-maps-scraper/web/sqlite"
 	"github.com/gosom/scrapemate"
+	"github.com/gosom/scrapemate/adapters/fetchers/jshttp"
 	"github.com/gosom/scrapemate/adapters/writers/csvwriter"
 	"github.com/gosom/scrapemate/scrapemateapp"
 	"golang.org/x/sync/errgroup"
@@ -201,6 +202,12 @@ func (w *webrunner) work(ctx context.Context) error {
 		log.Printf("requeued %d jobs interrupted by a restart", n)
 	}
 
+	if n, err := w.svc.RequeueFailedRuns(ctx); err != nil {
+		log.Printf("requeue failed jobs: %v", err)
+	} else if n > 0 {
+		log.Printf("requeued %d failed jobs", n)
+	}
+
 	var (
 		mu       sync.Mutex
 		inflight = make(map[string]struct{}, workers)
@@ -213,15 +220,46 @@ func (w *webrunner) work(ctx context.Context) error {
 	ticker := time.NewTicker(time.Second)
 	defer ticker.Stop()
 
+	lane := workers
+
 	for {
+		// A 429 is account-wide. Starting another browser now would dial
+		// straight back into the same window.
+		if wait := jshttp.UpstreamRateLimitWait(); wait > 0 {
+			if wait >= time.Second {
+				log.Printf("bandwidth limit: waiting %s, then continuing", wait.Round(time.Second))
+			}
+
+			timer := time.NewTimer(wait)
+
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+
+				return nil
+			case <-timer.C:
+			case <-done:
+				timer.Stop()
+			}
+
+			continue
+		}
+
+		slots := jshttp.UpstreamLaneCap(workers)
+		if slots != lane {
+			log.Printf("proxy bandwidth limit: running %d at a time", slots)
+			lane = slots
+		}
+
 		mu.Lock()
-		free := workers - len(inflight)
+		free := slots - len(inflight)
 		busy := len(inflight)
 		mu.Unlock()
 
 		if free > 0 {
-			// Ask for extra rows: jobs just started may still read as pending.
-			jobs, err := w.svc.SelectPendingN(ctx, free+busy)
+			// Ask for extra rows: jobs just started may still read as pending,
+			// and a job waiting out RetryAfter must not hide a ready one.
+			jobs, err := w.svc.SelectPendingN(ctx, max(free+busy+pendingLookahead, pendingLookahead))
 			if err != nil {
 				if ctx.Err() != nil {
 					return nil
@@ -328,33 +366,21 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	proxies := job.Data.Proxies
 	if len(w.cfg.Proxies) > 0 {
 		proxies = w.cfg.Proxies
-	}
+	} else if w.svc.RequiresProxies() {
+		// The list saved on the job is from the day it was created. ProxyScrape
+		// rotates the plan username; the old one still answers 429 while the
+		// current plan has bandwidth. Refresh talks to the account API only.
+		fresh, refreshErr := w.svc.AccountProxies(ctx)
+		if refreshErr != nil {
+			log.Printf("job %s proxy refresh: %v", job.ID, refreshErr)
+		} else if len(fresh) > 0 {
+			proxies = fresh
+			job.Data.Proxies = fresh
 
-	healthy, err := w.svc.JobProxies(ctx, proxies)
-	if err != nil && len(w.cfg.Proxies) == 0 {
-		// This job's own proxy list (frozen since it was created, possibly
-		// several retries ago) is exhausted. Pull a fresh one from ProxyScrape
-		// before giving up - the account's pool may have changed since, and
-		// without this a job would just keep replaying the same dead list.
-		if fresh, refreshErr := w.svc.RefreshProxies(ctx); refreshErr == nil {
-			if healthy, err = w.svc.JobProxies(ctx, fresh); err == nil {
-				proxies = fresh
-				job.Data.Proxies = fresh
+			if uerr := w.svc.Update(ctx, job); uerr != nil {
+				log.Printf("job %s proxy refresh save: %v", job.ID, uerr)
 			}
 		}
-	}
-
-	if err != nil {
-		log.Printf("job %s not started: %v", job.ID, err)
-
-		return w.finishJob(ctx, job, web.StatusFailed, err)
-	}
-
-	// The browser gets only the proxies that are not known to be dead; the job
-	// keeps its full list for the next run.
-	mateJob := *job
-	if len(w.cfg.Proxies) == 0 && len(healthy) > 0 {
-		mateJob.Data.Proxies = healthy
 	}
 
 	outpath := filepath.Join(w.cfg.DataFolder, job.ID+".csv")
@@ -368,6 +394,98 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		_ = outfile.Close()
 	}()
 
+	// A bandwidth 429 pauses this same run for the gateway's 120s and then
+	// continues. The job is not failed and does not go to the back of the queue.
+	for {
+		healthy, err := w.svc.JobProxies(ctx, proxies)
+		if err != nil && !errors.Is(err, web.ErrProxyCooling) && len(w.cfg.Proxies) == 0 {
+			// This job's own proxy list (frozen since it was created, possibly
+			// several retries ago) is exhausted. Pull a fresh one from ProxyScrape
+			// before giving up - the account's pool may have changed since, and
+			// without this a job would just keep replaying the same dead list.
+			if fresh, refreshErr := w.svc.RefreshProxies(ctx); refreshErr == nil {
+				if healthy, err = w.svc.JobProxies(ctx, fresh); err == nil {
+					proxies = fresh
+					job.Data.Proxies = fresh
+				}
+			}
+		}
+
+		if errors.Is(err, web.ErrProxyCooling) {
+			if werr := pauseForBandwidth(ctx, job.ID); werr != nil {
+				return w.finishJob(ctx, job, web.StatusFailed, werr)
+			}
+
+			continue
+		}
+
+		if err != nil {
+			log.Printf("job %s not started: %v", job.ID, err)
+
+			return w.finishJob(ctx, job, web.StatusFailed, err)
+		}
+
+		if _, seekErr := outfile.Seek(0, io.SeekStart); seekErr == nil {
+			_ = outfile.Truncate(0)
+		}
+
+		mate, runErr := w.runJobBrowser(ctx, job, outfile, healthy)
+		if errors.Is(runErr, errBandwidthPause) {
+			closeMate(mate)
+
+			if werr := pauseForBandwidth(ctx, job.ID); werr != nil {
+				return w.finishJob(ctx, job, web.StatusFailed, werr)
+			}
+
+			continue
+		}
+
+		var finishErr error
+		if runErr != nil {
+			finishErr = w.finishJob(ctx, job, web.StatusFailed, runErr)
+		} else {
+			finishErr = w.finishJob(ctx, job, web.StatusOK, nil)
+		}
+
+		closeMate(mate)
+
+		return finishErr
+	}
+}
+
+// errBandwidthPause means the run stopped because the proxy account is in
+// its 120s bandwidth window. The caller waits and continues the same job.
+var errBandwidthPause = errors.New("bandwidth limit")
+
+// pauseForBandwidth blocks until the gateway's Retry-After has elapsed.
+func pauseForBandwidth(ctx context.Context, jobID string) error {
+	wait := jshttp.UpstreamRateLimitWait()
+	if wait < time.Second {
+		wait = jshttp.AccountBandwidthPause
+	}
+
+	log.Printf("job %s bandwidth limit: waiting %s, then continuing", jobID, wait.Round(time.Second))
+
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
+// runJobBrowser runs one pass of the job. It returns errBandwidthPause when
+// the account 429'd before any place was found, so the caller can wait and
+// try this same job again. The caller closes mate after the job status is saved.
+func (w *webrunner) runJobBrowser(ctx context.Context, job *web.Job, outfile io.Writer, healthy []string) (mateRunner, error) {
+	mateJob := *job
+	if len(w.cfg.Proxies) == 0 && len(healthy) > 0 {
+		mateJob.Data.Proxies = healthy
+	}
+
 	setupMate := w.setupMate
 	if setupMate == nil {
 		setupMate = defaultSetupMate(w.cfg, w.mysqlDB, w.svc)
@@ -375,10 +493,8 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 
 	mate, err := setupMate(ctx, outfile, &mateJob)
 	if err != nil {
-		return w.finishJob(ctx, job, web.StatusFailed, err)
+		return nil, err
 	}
-
-	defer closeMate(mate)
 
 	var coords string
 	if hasCoordinates(job.Data.Lat, job.Data.Lon) {
@@ -408,65 +524,73 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 		runner.WithMaxDistance(radius),
 	)
 	if err != nil {
-		return w.finishJob(ctx, job, web.StatusFailed, err)
+		return mate, err
 	}
 
-	if len(seedJobs) > 0 {
-		exitMonitor.SetSeedCount(len(seedJobs))
+	if len(seedJobs) == 0 {
+		return mate, nil
+	}
 
-		allowedSeconds := max(60, len(seedJobs)*10*job.Data.Depth/50+120)
+	exitMonitor.SetSeedCount(len(seedJobs))
 
-		if job.Data.MaxTime > 0 {
-			if job.Data.MaxTime.Seconds() < 180 {
-				allowedSeconds = 180
-			} else {
-				allowedSeconds = int(job.Data.MaxTime.Seconds())
-			}
+	allowedSeconds := max(60, len(seedJobs)*10*job.Data.Depth/50+120)
+
+	if job.Data.MaxTime > 0 {
+		if job.Data.MaxTime.Seconds() < 180 {
+			allowedSeconds = 180
+		} else {
+			allowedSeconds = int(job.Data.MaxTime.Seconds())
 		}
+	}
 
-		log.Printf("running job %s with %d seed jobs and %d allowed seconds", job.ID, len(seedJobs), allowedSeconds)
+	log.Printf("running job %s with %d seed jobs and %d allowed seconds", job.ID, len(seedJobs), allowedSeconds)
 
-		mateCtx, cancel := context.WithTimeout(ctx, time.Duration(allowedSeconds)*time.Second)
-		defer cancel()
+	mateCtx, cancel := context.WithTimeout(ctx, time.Duration(allowedSeconds)*time.Second)
+	defer cancel()
 
-		exitMonitor.SetCancelFunc(cancel)
+	exitMonitor.SetCancelFunc(cancel)
 
-		go exitMonitor.Run(mateCtx)
+	go exitMonitor.Run(mateCtx)
 
-		// The browser normally stops at the time limit. If it hangs past it, the
-		// job is ended anyway so its slot goes to the next one.
-		started := make(chan error, 1)
+	// The browser normally stops at the time limit. If it hangs past it, the
+	// job is ended anyway so its slot goes to the next one.
+	started := make(chan error, 1)
 
-		go func() { started <- mate.Start(mateCtx, seedJobs...) }()
+	go func() { started <- mate.Start(mateCtx, seedJobs...) }()
 
-		hardLimit := time.NewTimer(time.Duration(allowedSeconds)*time.Second + stuckGrace)
-		defer hardLimit.Stop()
+	hardLimit := time.NewTimer(time.Duration(allowedSeconds)*time.Second + stuckGrace)
+	defer hardLimit.Stop()
 
-		select {
-		case err = <-started:
-		case <-hardLimit.C:
-			cancel()
-
-			log.Printf("job %s went past its time limit; stopping it", job.ID)
-
-			return w.finishJob(ctx, job, web.StatusFailed, errors.New(web.ErrMsgStuck))
-		case <-ctx.Done():
-			cancel()
-
-			return w.finishJob(ctx, job, web.StatusFailed, ctx.Err())
-		}
-
-		if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
-			cancel()
-
-			return w.finishJob(ctx, job, web.StatusFailed, err)
-		}
-
+	select {
+	case err = <-started:
+	case <-hardLimit.C:
 		cancel()
+
+		log.Printf("job %s went past its time limit; stopping it", job.ID)
+
+		return mate, errors.New(web.ErrMsgStuck)
+	case <-ctx.Done():
+		cancel()
+
+		return mate, ctx.Err()
 	}
 
-	return w.finishJob(ctx, job, web.StatusOK, nil)
+	cancel()
+
+	if places, _ := w.svc.Progress(job.ID); places == 0 && jshttp.UpstreamRateLimitWait() > 0 {
+		return mate, errBandwidthPause
+	}
+
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return mate, err
+	}
+
+	return mate, nil
 }
+
+// pendingLookahead is how many queued jobs are inspected per tick. The oldest
+// row can be sitting on RetryAfter while a later one is ready.
+const pendingLookahead = 50
 
 // stuckGrace is how long past its time limit a run may take to stop by itself.
 const stuckGrace = 2 * time.Minute
@@ -479,6 +603,10 @@ const mateCloseTimeout = 30 * time.Second
 // closeMate closes the job's app, fetcher and browsers, also when the run is
 // still stuck in Start, without letting a hung close block the worker.
 func closeMate(m mateRunner) {
+	if m == nil {
+		return
+	}
+
 	done := make(chan struct{})
 
 	go func() {
@@ -501,6 +629,10 @@ func (w *webrunner) finishJob(ctx context.Context, job *web.Job, status string, 
 	job.Data.Run.FinishedAt = time.Now().UTC()
 	job.Data.Run.Places = w.svc.StopProgress(job.ID)
 
+	if job.Data.Run.Places > 0 {
+		jshttp.NoteUpstreamRecovered()
+	}
+
 	switch {
 	case runErr != nil:
 		job.Data.Run.Error = runErr.Error()
@@ -514,8 +646,8 @@ func (w *webrunner) finishJob(ctx context.Context, job *web.Job, status string, 
 	// A failed run goes to the end of the queue for another try, unless the
 	// server is shutting down (then the restart requeues it).
 	if job.Status == web.StatusFailed && ctx.Err() == nil && web.QueueRetry(job, time.Now().UTC()) {
-		log.Printf("job %s failed (attempt %d of %d), queued again: %s",
-			job.ID, job.Data.Run.Attempts, web.MaxJobAttempts, job.Data.Run.Error)
+		log.Printf("job %s failed (attempt %d), back of the queue: %s",
+			job.ID, job.Data.Run.Attempts, job.Data.Run.Error)
 	}
 
 	// The job context may already be canceled here; the result still needs saving.
@@ -552,8 +684,19 @@ func (p *progressWriter) Run(_ context.Context, in <-chan scrapemate.Result) err
 
 func defaultSetupMate(cfg *runner.Config, mysqlDB *sql.DB, svc *web.Service) func(context.Context, io.Writer, *web.Job) (mateRunner, error) {
 	return func(_ context.Context, writer io.Writer, job *web.Job) (mateRunner, error) {
+		conc := cfg.Concurrency
+		if conc < 1 {
+			conc = 1
+		}
+
+		// One page while the account is on a bandwidth limit. A second page
+		// is another full Maps load on the same bucket.
+		if jshttp.UpstreamBandwidthLimited() {
+			conc = 1
+		}
+
 		opts := []func(*scrapemateapp.Config) error{
-			scrapemateapp.WithConcurrency(cfg.Concurrency),
+			scrapemateapp.WithConcurrency(conc),
 			scrapemateapp.WithExitOnInactivity(time.Minute * 3),
 		}
 

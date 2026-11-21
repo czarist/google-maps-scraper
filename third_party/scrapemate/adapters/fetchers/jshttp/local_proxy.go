@@ -381,14 +381,28 @@ const maxFailoverCandidates = 25
 // difference those clients do not share.
 const connectUserAgent = "Go-http-client/1.1"
 
-// A 429 is account-wide, so every in-flight CONNECT in the process has to
-// pause together. Otherwise each browser socket would keep dialing through
-// the cooldown and the window would never recover.
+// A 429 is account-wide. The CONNECT that receives it must fail at once:
+// holding the browser socket for the whole Retry-After made Playwright time
+// out, and every socket waiting on that pause then dialed together and tripped
+// the limit again. New jobs wait out the pause; dials during it are refused
+// locally and never reach the gateway.
 const (
 	defaultRateLimitBackoff = 15 * time.Second
-	maxRateLimitBackoff     = 20 * time.Second
-	rateLimitLogInterval    = time.Minute
-	upstreamReadTimeout     = 15 * time.Second
+	// AccountBandwidthPause is the wait when the gateway says Retry-After: 120
+	// or when the HTTP client hides that header. The job stays on this run
+	// and continues when the timer ends.
+	AccountBandwidthPause = 2 * time.Minute
+	// maxRateLimitBackoff caps one Retry-After header so a bad value cannot
+	// pause the process for hours.
+	maxRateLimitBackoff  = 3 * time.Minute
+	singleLaneFor        = 10 * time.Minute
+	rateLimitLogInterval = time.Minute
+	upstreamReadTimeout  = 15 * time.Second
+	// upstreamRecoveriesToWiden is how many searches must find places before
+	// a second job is allowed. The full worker count stays off: four browsers
+	// emptied the bandwidth bucket the moment the pause ended.
+	upstreamRecoveriesToWiden = 2
+	recoveredLaneCap          = 2
 )
 
 // errUpstreamRateLimited is wrapped around the upstream status when CONNECT
@@ -396,53 +410,109 @@ const (
 var errUpstreamRateLimited = errors.New("upstream proxy rate limited")
 
 var (
-	rateLimitMu    sync.Mutex
-	rateLimitUntil time.Time
+	rateLimitMu        sync.Mutex
+	rateLimitUntil     time.Time
+	singleLaneUntil    time.Time
+	upstreamRecoveries int
+	bandwidthLimited   bool
 
 	rateLimitLogMu sync.Mutex
 	rateLimitLogAt time.Time
 )
 
 // noteUpstreamRateLimit pushes the process-wide pause out to now+d. A later
-// 429 can only extend the pause, never shorten one already in effect.
+// 429 in the same burst can only extend the pause, never shorten it. d is the
+// gateway Retry-After, 120s for a bandwidth limit.
 func noteUpstreamRateLimit(d time.Duration) {
 	if d <= 0 {
 		d = defaultRateLimitBackoff
 	}
 
 	d = capRateLimitBackoff(d)
-	until := time.Now().Add(d)
+	now := time.Now()
 
 	rateLimitMu.Lock()
 	defer rateLimitMu.Unlock()
 
+	until := now.Add(d)
 	if until.After(rateLimitUntil) {
 		rateLimitUntil = until
 	}
+
+	bandwidthLimited = true
+	upstreamRecoveries = 0
+
+	lane := now.Add(singleLaneFor)
+	if lane.After(singleLaneUntil) {
+		singleLaneUntil = lane
+	}
 }
 
-// waitUpstreamRateLimit blocks until the process-wide 429 pause has elapsed.
-// The deadline is re-read after every sleep because another CONNECT may have
-// extended it while this one was waiting.
-func waitUpstreamRateLimit(ctx context.Context) error {
-	for {
-		rateLimitMu.Lock()
-		wait := time.Until(rateLimitUntil)
-		rateLimitMu.Unlock()
+// HoldUpstreamRateLimit arms the same pause a CONNECT 429 uses. Preflight
+// calls it when the HTTP client reports Too Many Requests without a header.
+func HoldUpstreamRateLimit(d time.Duration) {
+	noteUpstreamRateLimit(d)
+}
 
-		if wait <= 0 {
-			return nil
-		}
+// UpstreamRateLimitWait reports how long new jobs should wait after a 429.
+// The gateway's Retry-After applies to the whole account.
+func UpstreamRateLimitWait() time.Duration {
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
 
-		timer := time.NewTimer(wait)
+	return max(time.Until(rateLimitUntil), 0)
+}
 
-		select {
-		case <-timer.C:
-		case <-ctx.Done():
-			timer.Stop()
+// UpstreamBandwidthLimited reports whether this process has seen a bandwidth
+// 429. It stays set so the worker does not go back to a full stampede.
+func UpstreamBandwidthLimited() bool {
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
 
-			return ctx.Err()
-		}
+	return bandwidthLimited
+}
+
+// UpstreamLaneCap is how many jobs may run at once. It stays at 1 until a
+// search finds places. After a bandwidth 429 it stays narrow (one, then two)
+// so the account is not stampeded again.
+func UpstreamLaneCap(maxSlots int) int {
+	if maxSlots < 1 {
+		maxSlots = 1
+	}
+
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
+
+	if !bandwidthLimited {
+		return maxSlots
+	}
+
+	// After a 429, one browser until a couple of searches find places.
+	if upstreamRecoveries < 1 || time.Now().Before(singleLaneUntil) {
+		return 1
+	}
+
+	if maxSlots > recoveredLaneCap {
+		return recoveredLaneCap
+	}
+
+	return maxSlots
+}
+
+// NoteUpstreamRecovered records that a search found places, so the account
+// can widen past a single job.
+func NoteUpstreamRecovered() {
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
+
+	upstreamRecoveries++
+
+	if !bandwidthLimited {
+		return
+	}
+
+	if upstreamRecoveries >= upstreamRecoveriesToWiden {
+		singleLaneUntil = time.Time{}
 	}
 }
 
@@ -456,8 +526,8 @@ func capRateLimitBackoff(d time.Duration) time.Duration {
 
 // retryAfterDuration reads Retry-After (delta-seconds or HTTP-date). A
 // missing or unusable value falls back to defaultRateLimitBackoff. The result
-// is capped so one header cannot hold dials past the local server's write
-// timeout, which is also about when the browser gives up on the socket.
+// is capped at maxRateLimitBackoff so one header cannot pause the process
+// for hours.
 func retryAfterDuration(resp *http.Response) time.Duration {
 	if resp == nil {
 		return defaultRateLimitBackoff
@@ -578,10 +648,11 @@ func writeConnectRequest(conn net.Conn, host, auth string) error {
 // with releaseConnectSlotFor. A 429 does not try another exit: the error
 // wraps errUpstreamRateLimited and the process pause is already armed.
 func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn, error) {
-	// The pause uses the request context, not the dial timeout below. A 15s
-	// cooldown must not expire the 30s dial budget before the TCP handshake.
-	if err := waitUpstreamRateLimit(r.Context()); err != nil {
-		return nil, err
+	// Refuse locally while the account pause is in effect. Waiting here held
+	// the browser socket until Playwright gave up, then every parked CONNECT
+	// dialed in the same instant.
+	if UpstreamRateLimitWait() > 0 {
+		return nil, errUpstreamRateLimited
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
@@ -663,9 +734,9 @@ func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn
 	return nil, fmt.Errorf("upstream %s: %s", cand.upstream.Host, resp.Status)
 }
 
-// dialCandidates tries exits until one accepts the CONNECT. It returns the
-// candidate that answered 429 so the caller can retry that one exit after
-// the pause, without walking the rest of the list.
+// dialCandidates tries exits until one accepts the CONNECT. A 429 stops the
+// walk and leaves the process pause armed; the caller fails that CONNECT
+// instead of parking the browser on the pause.
 func (p *AuthProxy) dialCandidates(r *http.Request, candidates []*AuthProxy) (net.Conn, string, *AuthProxy, error) {
 	var lastErr error
 
@@ -707,22 +778,11 @@ func (p *AuthProxy) handleHTTPConnect(w http.ResponseWriter, r *http.Request) {
 		candidates = append(candidates, p.pool.Alternates(p, maxFailoverCandidates)...)
 	}
 
-	upstreamConn, connectedHost, limited, lastErr := p.dialCandidates(r, candidates)
-	if upstreamConn == nil && limited != nil {
-		// One retry of the exit that answered, after the account pause.
-		// connectCandidate waits again, so a 429 that landed while we were
-		// already asleep cannot be dialed early.
-		if err = waitUpstreamRateLimit(r.Context()); err != nil {
-			lastErr = err
-		} else if conn, connErr := p.connectCandidate(r, limited); connErr != nil {
-			lastErr = connErr
-		} else {
-			upstreamConn = conn
-			connectedHost = limited.upstream.Host
-		}
-	}
+	upstreamConn, connectedHost, _, lastErr := p.dialCandidates(r, candidates)
 
 	if upstreamConn == nil {
+		// A 429 already armed the process pause. Answer the browser now so it
+		// can fail this navigation instead of sitting on a dead socket.
 		if !errors.Is(lastErr, errUpstreamRateLimited) {
 			p.logger.Printf("All %d proxy candidate(s) rejected CONNECT for %s: %v", len(candidates), r.Host, lastErr)
 		}

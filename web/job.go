@@ -150,13 +150,14 @@ type JobRun struct {
 	Places     int       `json:"places"`
 	// Error explains why a run failed, when it is known.
 	Error string `json:"error,omitempty"`
-	// Attempts counts the runs so far. A failed run is queued again until MaxJobAttempts.
+	// Attempts counts the runs so far. A failed run is queued again, behind the others.
 	Attempts int `json:"attempts,omitempty"`
 	// RetryAfter holds a failed job back from the queue until this time.
 	RetryAfter time.Time `json:"retry_after,omitzero"`
 }
 
-// MaxJobAttempts is how many times a job runs before it stays failed.
+// MaxJobAttempts is the attempt count shown in the UI. A failed run is queued
+// again past this number; it does not stay failed.
 const MaxJobAttempts = 3
 
 // Retrying reports whether the job failed before and is queued for another try.

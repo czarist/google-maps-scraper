@@ -70,7 +70,7 @@
                 </div>
                 {{else if eq .Status "pending"}}
                 {{if .Data.Run.Retrying}}
-                <p class="run-line run-muted">{{t "Try %d of %d, after the other jobs" .Data.Run.NextAttempt .Data.Run.MaxAttempts}}</p>
+                <p class="run-line run-muted">{{t "Try %d, after the other jobs" .Data.Run.NextAttempt}}</p>
                 <p class="run-line run-muted">{{t "Last try: %s" (t .Data.Run.Error)}}</p>
                 {{else}}
                 <p class="run-line run-muted">{{if gt $.Running 0}}{{t "Waiting for a free slot"}}{{else}}{{t "Starting in a moment"}}{{end}}</p>
