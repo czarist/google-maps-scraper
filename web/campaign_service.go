@@ -742,6 +742,25 @@ func dropSent(ctx context.Context, store CampaignStore, campaignID string, recs 
 	return kept, skipped, nil
 }
 
+// RecoverInterruptedDispatches marks every dispatch still "running" as
+// interrupted. Call this once when the server starts: nothing can really be
+// sending yet, but a dispatch row left "running" by the previous process
+// otherwise still passes DispatchRunning's check for up to dispatchStaleAfter
+// (2h), silently blocking every auto or manual send for the campaign until
+// then.
+func (s *Service) RecoverInterruptedDispatches(ctx context.Context) (int, error) {
+	store, err := s.campaignStore()
+	if err != nil {
+		if errors.Is(err, errCampaignsUnavailable) {
+			return 0, nil
+		}
+
+		return 0, err
+	}
+
+	return store.ExpireRunningDispatches(ctx)
+}
+
 func (s *Service) expireStaleDispatch(ctx context.Context, store CampaignStore, campaignID string) error {
 	// A paced run can outlive the two-hour mark. Only a dead process is interrupted.
 	if s.dispatchInProcess(campaignID) {

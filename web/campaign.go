@@ -47,12 +47,13 @@ const (
 	DefaultResendAfter = 4 * 24 * time.Hour
 
 	// mailMinWait and mailMaxWait bound the random pause between two messages.
-	mailMinWait = 5 * time.Second
-	mailMaxWait = 8 * time.Second
+	// +30% over the original 5-8s, to send a bit more cautiously.
+	mailMinWait = 6500 * time.Millisecond
+	mailMaxWait = 10400 * time.Millisecond
 	// mailBatchSize is how many messages go out before the batch pause.
 	mailBatchSize = 20
-	// mailBatchGap is the pause after each full batch.
-	mailBatchGap = 20 * time.Second
+	// mailBatchGap is the pause after each full batch. +30% over the original 20s.
+	mailBatchGap = 26 * time.Second
 )
 
 // ErrDispatchRunning is returned when a campaign already has a send in progress.
@@ -334,4 +335,9 @@ type CampaignStore interface {
 	UpdateDispatch(context.Context, *Dispatch) error
 	ListDispatches(context.Context, string, int) ([]Dispatch, error)
 	LatestRunningDispatch(context.Context, string) (Dispatch, bool, error)
+	// ExpireRunningDispatches marks every dispatch still "running" as
+	// interrupted. Called once at startup: a restart kills whatever process
+	// was actually sending, but its row otherwise looks running for up to
+	// dispatchStaleAfter and silently blocks a new send for that long.
+	ExpireRunningDispatches(context.Context) (int, error)
 }

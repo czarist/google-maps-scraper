@@ -654,6 +654,21 @@ func (repo *repo) LatestRunningDispatch(ctx context.Context, campaignID string) 
 	return list[0], true, nil
 }
 
+func (repo *repo) ExpireRunningDispatches(ctx context.Context) (int, error) {
+	res, err := repo.db.ExecContext(ctx, `
+		UPDATE campaign_dispatches
+		SET status = ?, finished_at = ?, detail = ?
+		WHERE status = ?
+	`, web.DispatchFailed, unixOrZero(time.Now().UTC()), "interrupted", web.DispatchRunning)
+	if err != nil {
+		return 0, err
+	}
+
+	n, err := res.RowsAffected()
+
+	return int(n), err
+}
+
 func scanDispatches(rows *sql.Rows) ([]web.Dispatch, error) {
 	var out []web.Dispatch
 

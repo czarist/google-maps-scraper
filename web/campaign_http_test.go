@@ -550,6 +550,23 @@ func (m *memStore) LatestRunningDispatch(_ context.Context, campaignID string) (
 	return Dispatch{}, false, nil
 }
 
+func (m *memStore) ExpireRunningDispatches(_ context.Context) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	n := 0
+
+	for i := range m.dispatches {
+		if m.dispatches[i].Status == DispatchRunning {
+			m.dispatches[i].Status = DispatchFailed
+			m.dispatches[i].Detail = "interrupted"
+			n++
+		}
+	}
+
+	return n, nil
+}
+
 func removeID(ids []string, id string) []string {
 	out := ids[:0]
 

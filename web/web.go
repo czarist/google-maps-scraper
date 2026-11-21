@@ -194,6 +194,15 @@ func New(svc *Service, addr string) (*Server, error) {
 }
 
 func (s *Server) Start(ctx context.Context) error {
+	// A dispatch row left "running" by the previous process is not actually
+	// running anymore - clear it now instead of letting it silently block
+	// auto/manual sending for up to dispatchStaleAfter after every restart.
+	if n, err := s.svc.RecoverInterruptedDispatches(ctx); err != nil {
+		log.Printf("recover interrupted dispatches: %v", err)
+	} else if n > 0 {
+		log.Printf("recovered %d dispatch(es) interrupted by a restart", n)
+	}
+
 	// Automatic sending: campaigns with it on get new addresses sent without a click.
 	go s.svc.RunAutoDispatch(ctx, s.sendMail, AutoDispatchInterval)
 
