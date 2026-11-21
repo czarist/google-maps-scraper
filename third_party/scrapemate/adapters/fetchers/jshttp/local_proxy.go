@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -11,6 +12,8 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -56,19 +59,19 @@ func throttleConnect(ctx context.Context) error {
 
 // maxConcurrentPerProxy caps how many upstream tunnels can be open at once
 // through a single exit IP. Chromium opens many simultaneous connections for
-// one page (every subresource: scripts, images, XHRs, ...), and since one
-// browser is pinned to one exit proxy for its whole session (ProxyPool.Next
-// is called once per browser, not per request), a single real Maps page load
-// alone easily exceeds a shared datacenter proxy's per-IP connection limit -
-// this is the 429 seen even with only one job running at a time. Queuing the
-// extra connections here instead of firing them all at once makes the page
-// load a bit slower but keeps it under the exit IP's own limit.
+// one page (every subresource: scripts, images, XHRs, ...), and one browser
+// stays pinned to one exit proxy for its whole session (ProxyPool.Next is
+// called once per browser, not per request). Queuing the extras keeps a
+// single exit from taking the whole account budget.
 //
-// This has to be keyed by the upstream address and shared process-wide, not
-// kept on the AuthProxy struct: every job builds its own ProxyPool with its
-// own fresh AuthProxy instances, so two different jobs that happen to pick
-// the same exit IP would otherwise each get their own independent budget for
-// the same real upstream connection limit.
+// A 429 from this gateway is not a signal about that exit IP. It is applied
+// to the account (or the source IP) and is handled by noteUpstreamRateLimit,
+// which stops the candidate walk instead of opening more connections.
+//
+// The cap is keyed by the upstream address and shared process-wide, not kept
+// on the AuthProxy struct: every job builds its own ProxyPool with its own
+// fresh AuthProxy instances, so two jobs that pick the same exit IP would
+// otherwise each get their own budget for the same upstream.
 const maxConcurrentPerProxy = 6
 
 var (
@@ -361,25 +364,226 @@ func (p *AuthProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 }
 
 // maxFailoverCandidates is how many other proxies already in the pool get
-// tried, through this same local listener, when the one this AuthProxy is
-// pinned to keeps rejecting CONNECT. The browser never notices: it only ever
-// talks to this one local address, whichever real exit IP ends up serving it.
-// Set fairly high because a shared datacenter plan's 429 is unpredictable per
-// IP - keep trying different exit IPs until one works. Bounded well below
-// the full pool size so one subresource request can't, in the worst case
-// (every candidate rejected), eat the whole job's time budget at
-// connectMinInterval pacing (25 * connectMinInterval here).
+// tried, through this same local listener, when the pinned upstream rejects
+// CONNECT for a reason specific to that exit (refused, timed out, 5xx, auth).
+// The browser never notices: it only ever talks to this one local address.
+//
+// A 429 is not one of those reasons. On a shared datacenter plan the gateway
+// applies it to the account, so the next exit IP answers 429 as well, and
+// walking the list multiplies the requests that tripped the limit. The
+// candidate loop stops on 429, the process waits out Retry-After, and one
+// exit is tried again.
 const maxFailoverCandidates = 25
 
+// connectUserAgent is sent on the upstream CONNECT. Go's net/http Transport
+// (the preflight in web/proxies.go) and curl both send a User-Agent; a bare
+// CONNECT with only Host and Proxy-Authorization is the one byte-level
+// difference those clients do not share.
+const connectUserAgent = "Go-http-client/1.1"
+
+// A 429 is account-wide, so every in-flight CONNECT in the process has to
+// pause together. Otherwise each browser socket would keep dialing through
+// the cooldown and the window would never recover.
+const (
+	defaultRateLimitBackoff = 15 * time.Second
+	maxRateLimitBackoff     = 20 * time.Second
+	rateLimitLogInterval    = time.Minute
+	upstreamReadTimeout     = 15 * time.Second
+)
+
+// errUpstreamRateLimited is wrapped around the upstream status when CONNECT
+// is answered with 429. Callers stop trying other exits and wait.
+var errUpstreamRateLimited = errors.New("upstream proxy rate limited")
+
+var (
+	rateLimitMu    sync.Mutex
+	rateLimitUntil time.Time
+
+	rateLimitLogMu sync.Mutex
+	rateLimitLogAt time.Time
+)
+
+// noteUpstreamRateLimit pushes the process-wide pause out to now+d. A later
+// 429 can only extend the pause, never shorten one already in effect.
+func noteUpstreamRateLimit(d time.Duration) {
+	if d <= 0 {
+		d = defaultRateLimitBackoff
+	}
+
+	d = capRateLimitBackoff(d)
+	until := time.Now().Add(d)
+
+	rateLimitMu.Lock()
+	defer rateLimitMu.Unlock()
+
+	if until.After(rateLimitUntil) {
+		rateLimitUntil = until
+	}
+}
+
+// waitUpstreamRateLimit blocks until the process-wide 429 pause has elapsed.
+// The deadline is re-read after every sleep because another CONNECT may have
+// extended it while this one was waiting.
+func waitUpstreamRateLimit(ctx context.Context) error {
+	for {
+		rateLimitMu.Lock()
+		wait := time.Until(rateLimitUntil)
+		rateLimitMu.Unlock()
+
+		if wait <= 0 {
+			return nil
+		}
+
+		timer := time.NewTimer(wait)
+
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+
+			return ctx.Err()
+		}
+	}
+}
+
+func capRateLimitBackoff(d time.Duration) time.Duration {
+	if d > maxRateLimitBackoff {
+		return maxRateLimitBackoff
+	}
+
+	return d
+}
+
+// retryAfterDuration reads Retry-After (delta-seconds or HTTP-date). A
+// missing or unusable value falls back to defaultRateLimitBackoff. The result
+// is capped so one header cannot hold dials past the local server's write
+// timeout, which is also about when the browser gives up on the socket.
+func retryAfterDuration(resp *http.Response) time.Duration {
+	if resp == nil {
+		return defaultRateLimitBackoff
+	}
+
+	v := strings.TrimSpace(resp.Header.Get("Retry-After"))
+	if v == "" {
+		return defaultRateLimitBackoff
+	}
+
+	if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+		return capRateLimitBackoff(time.Duration(secs) * time.Second)
+	}
+
+	if when, err := http.ParseTime(v); err == nil {
+		if d := time.Until(when); d > 0 {
+			return capRateLimitBackoff(d)
+		}
+	}
+
+	return defaultRateLimitBackoff
+}
+
+func upstreamBodySnippet(resp *http.Response) string {
+	if resp == nil || resp.Body == nil {
+		return ""
+	}
+
+	defer resp.Body.Close()
+
+	b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+	s := strings.Join(strings.Fields(string(b)), " ")
+
+	if len(s) > 200 {
+		s = s[:200]
+	}
+
+	return s
+}
+
+func rateLimitHeaderSummary(h http.Header) string {
+	if len(h) == 0 {
+		return ""
+	}
+
+	parts := make([]string, 0, 2)
+
+	for k, vs := range h {
+		lk := strings.ToLower(k)
+		if strings.Contains(lk, "ratelimit") || strings.Contains(lk, "rate-limit") {
+			parts = append(parts, k+"="+strings.Join(vs, ","))
+		}
+	}
+
+	sort.Strings(parts)
+
+	return strings.Join(parts, "; ")
+}
+
+// logUpstreamRateLimit records the gateway's 429 once a minute. Every browser
+// socket hits the same response; the body and Retry-After only need to be
+// visible the first time the window trips.
+func logUpstreamRateLimit(logger *log.Logger, upstream string, resp *http.Response, body string) {
+	if logger == nil || resp == nil {
+		return
+	}
+
+	rateLimitLogMu.Lock()
+	defer rateLimitLogMu.Unlock()
+
+	if !rateLimitLogAt.IsZero() && time.Since(rateLimitLogAt) < rateLimitLogInterval {
+		return
+	}
+
+	rateLimitLogAt = time.Now()
+
+	logger.Printf("upstream %s CONNECT rate limit: %s retry-after=%q server=%q rate-limit=%q body=%q",
+		upstream, resp.Status, resp.Header.Get("Retry-After"), resp.Header.Get("Server"), rateLimitHeaderSummary(resp.Header), body)
+}
+
+// prefixConn replays bytes http.ReadResponse pulled into its buffer ahead
+// of the tunnel. After that buffer is empty, reads go straight to the conn.
+type prefixConn struct {
+	net.Conn
+	r *bufio.Reader
+}
+
+func (c *prefixConn) Read(p []byte) (int, error) {
+	if c.r != nil && c.r.Buffered() > 0 {
+		return c.r.Read(p)
+	}
+
+	return c.Conn.Read(p)
+}
+
+func writeConnectRequest(conn net.Conn, host, auth string) error {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "CONNECT %s HTTP/1.1\r\n", host)
+	fmt.Fprintf(&b, "Host: %s\r\n", host)
+	fmt.Fprintf(&b, "User-Agent: %s\r\n", connectUserAgent)
+	b.WriteString("Proxy-Connection: Keep-Alive\r\n")
+
+	if auth != "" {
+		fmt.Fprintf(&b, "Proxy-Authorization: Basic %s\r\n", auth)
+	}
+
+	b.WriteString("\r\n")
+
+	_, err := io.WriteString(conn, b.String())
+
+	return err
+}
+
 // connectCandidate dials one candidate upstream and attempts the CONNECT.
-// With a shared datacenter plan, a 429 on one exit IP says little about the
-// next one, so this does not retry the same IP - handleHTTPConnect's caller
-// moves on to the next candidate instead, which cycles through many more
-// distinct exit IPs in the same amount of time than retrying one repeatedly
-// would. On success the returned connection's concurrency slot is already
-// held for cand.upstream.Host; the caller must release it once the tunnel is
-// done with releaseConnectSlotFor.
+// On success the returned connection's concurrency slot is already held for
+// cand.upstream.Host; the caller must release it once the tunnel is done
+// with releaseConnectSlotFor. A 429 does not try another exit: the error
+// wraps errUpstreamRateLimited and the process pause is already armed.
 func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn, error) {
+	// The pause uses the request context, not the dial timeout below. A 15s
+	// cooldown must not expire the 30s dial budget before the TCP handshake.
+	if err := waitUpstreamRateLimit(r.Context()); err != nil {
+		return nil, err
+	}
+
 	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
 	defer cancel()
 
@@ -402,20 +606,20 @@ func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn
 		return nil, fmt.Errorf("dial %s: %w", cand.upstream.Host, err)
 	}
 
-	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", r.Host, r.Host)
-	if cand.auth != "" {
-		connectReq += "Proxy-Authorization: Basic " + cand.auth + "\r\n"
-	}
-
-	connectReq += "\r\n"
-	if _, err = conn.Write([]byte(connectReq)); err != nil {
+	if err = writeConnectRequest(conn, r.Host, cand.auth); err != nil {
 		releaseConnectSlotFor(cand.upstream.Host)
 		conn.Close()
 
 		return nil, fmt.Errorf("write CONNECT to %s: %w", cand.upstream.Host, err)
 	}
 
-	resp, err := http.ReadResponse(bufio.NewReader(conn), r)
+	// Bound the header read. The dial context covers the handshake only, and
+	// a 429 body with no length would otherwise sit in Body.Close forever.
+	_ = conn.SetReadDeadline(time.Now().Add(upstreamReadTimeout))
+
+	br := bufio.NewReader(conn)
+
+	resp, err := http.ReadResponse(br, r)
 	if err != nil {
 		releaseConnectSlotFor(cand.upstream.Host)
 		conn.Close()
@@ -423,16 +627,62 @@ func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn
 		return nil, fmt.Errorf("read CONNECT response from %s: %w", cand.upstream.Host, err)
 	}
 
-	resp.Body.Close()
+	if resp.StatusCode == http.StatusTooManyRequests {
+		body := upstreamBodySnippet(resp)
+
+		noteUpstreamRateLimit(retryAfterDuration(resp))
+		logUpstreamRateLimit(p.logger, cand.upstream.Host, resp, body)
+
+		releaseConnectSlotFor(cand.upstream.Host)
+		conn.Close()
+
+		return nil, fmt.Errorf("%w: upstream %s: %s", errUpstreamRateLimited, cand.upstream.Host, resp.Status)
+	}
 
 	if resp.StatusCode == http.StatusOK {
-		return conn, nil
+		// RFC 9110: a 2xx CONNECT response has no body. ReadResponse still
+		// treats a length-less 200 as "read until the peer closes", and
+		// Body.Close would discard the tunnel. Keep the buffered reader so
+		// bytes already pulled off the wire are delivered to the browser.
+		_ = conn.SetDeadline(time.Time{})
+
+		if tcp, ok := conn.(*net.TCPConn); ok {
+			_ = tcp.SetNoDelay(true)
+			_ = tcp.SetKeepAlive(true)
+			_ = tcp.SetKeepAlivePeriod(30 * time.Second)
+		}
+
+		return &prefixConn{Conn: conn, r: br}, nil
 	}
+
+	resp.Body.Close()
 
 	releaseConnectSlotFor(cand.upstream.Host)
 	conn.Close()
 
 	return nil, fmt.Errorf("upstream %s: %s", cand.upstream.Host, resp.Status)
+}
+
+// dialCandidates tries exits until one accepts the CONNECT. It returns the
+// candidate that answered 429 so the caller can retry that one exit after
+// the pause, without walking the rest of the list.
+func (p *AuthProxy) dialCandidates(r *http.Request, candidates []*AuthProxy) (net.Conn, string, *AuthProxy, error) {
+	var lastErr error
+
+	for _, cand := range candidates {
+		conn, err := p.connectCandidate(r, cand)
+		if err == nil {
+			return conn, cand.upstream.Host, nil, nil
+		}
+
+		lastErr = err
+
+		if errors.Is(err, errUpstreamRateLimited) {
+			return nil, "", cand, err
+		}
+	}
+
+	return nil, "", nil, lastErr
 }
 
 func (p *AuthProxy) handleHTTPConnect(w http.ResponseWriter, r *http.Request) {
@@ -457,26 +707,26 @@ func (p *AuthProxy) handleHTTPConnect(w http.ResponseWriter, r *http.Request) {
 		candidates = append(candidates, p.pool.Alternates(p, maxFailoverCandidates)...)
 	}
 
-	var (
-		upstreamConn  net.Conn
-		connectedHost string
-		lastErr       error
-	)
-
-	for _, cand := range candidates {
-		conn, connErr := p.connectCandidate(r, cand)
-		if connErr == nil {
+	upstreamConn, connectedHost, limited, lastErr := p.dialCandidates(r, candidates)
+	if upstreamConn == nil && limited != nil {
+		// One retry of the exit that answered, after the account pause.
+		// connectCandidate waits again, so a 429 that landed while we were
+		// already asleep cannot be dialed early.
+		if err = waitUpstreamRateLimit(r.Context()); err != nil {
+			lastErr = err
+		} else if conn, connErr := p.connectCandidate(r, limited); connErr != nil {
+			lastErr = connErr
+		} else {
 			upstreamConn = conn
-			connectedHost = cand.upstream.Host
-
-			break
+			connectedHost = limited.upstream.Host
 		}
-
-		lastErr = connErr
 	}
 
 	if upstreamConn == nil {
-		p.logger.Printf("All %d proxy candidate(s) rejected CONNECT for %s: %v", len(candidates), r.Host, lastErr)
+		if !errors.Is(lastErr, errUpstreamRateLimited) {
+			p.logger.Printf("All %d proxy candidate(s) rejected CONNECT for %s: %v", len(candidates), r.Host, lastErr)
+		}
+
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 
 		return
