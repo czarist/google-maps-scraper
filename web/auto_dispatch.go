@@ -129,6 +129,12 @@ func (s *Service) AutoDispatchOnce(ctx context.Context, send MailSender) {
 			continue
 		}
 
+		if s.providerBlockCooling(ctx, id) {
+			log.Printf("auto dispatch %s: waiting after a provider block", id)
+
+			continue
+		}
+
 		res, err := s.startDispatch(ctx, id, DispatchOptions{
 			Resend:      a.Resend,
 			ResendAfter: a.ResendAfter(),

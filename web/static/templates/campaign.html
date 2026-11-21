@@ -278,7 +278,7 @@
             <h2><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
-            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, with a random 5 to 8 second pause between messages and a 20 second pause after every 20."}}</p>
+            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, in batches of 20, with a random 20 to 75 second pause between messages and a random 1 to 3 minute pause between batches."}}</p>
             </div>
             <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
                 <label class="check" for="resend">
@@ -321,7 +321,7 @@
                     <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
                     <span>
                         <i class="fas fa-robot" aria-hidden="true"></i> {{t "Send automatically to new addresses"}}
-                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (5 to 8 seconds apart, 20 seconds after every 20). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send."}}</small>
+                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (batches of 20, 20 to 75 seconds apart, 1 to 3 minutes between batches). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send. A Zoho block stops the run and automatic sending waits 30 minutes."}}</small>
                     </span>
                 </label>
                 <label class="check" for="auto_resend">

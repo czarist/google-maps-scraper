@@ -870,6 +870,15 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		status := MailStatusSent
 		errMsg := ""
 
+		if isProviderBlock(sendErr) {
+			// The account is blocked, not this address. Leave it queued and stop
+			// so the rest of the list is not recorded as failed.
+			halt = fmt.Errorf("%w: %s", errProviderBlock, sendErr.Error())
+			log.Printf("dispatch %s stopped: %v", dispatchID, halt)
+
+			break
+		}
+
 		if sendErr != nil {
 			failed++
 			status = MailStatusFailed
@@ -934,9 +943,54 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 	}
 }
 
+// errProviderBlock stops a run when the SMTP account itself is refused.
+var errProviderBlock = errors.New("email provider blocked this account for unusual sending activity")
+
 // suspendsSend reports errors that stop a send without trying the provider.
 func suspendsSend(err error) bool {
 	return errors.Is(err, ErrOptOutUnavailable) || errors.Is(err, ErrInvalidService) || errors.Is(err, errUnsubscribeLink)
+}
+
+// isProviderBlock reports an SMTP refusal of the sending account, such as Zoho 5.4.6.
+func isProviderBlock(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	return providerBlockText(err.Error())
+}
+
+func providerBlockText(s string) bool {
+	text := strings.ToLower(s)
+
+	return strings.Contains(text, "unusual sending activity") ||
+		strings.Contains(text, "5.4.6") ||
+		strings.Contains(text, "unblockme")
+}
+
+// providerBlockCooling reports whether automatic sending should wait. A manual
+// send does not call this.
+func (s *Service) providerBlockCooling(ctx context.Context, campaignID string) bool {
+	store, err := s.campaignStore()
+	if err != nil {
+		return false
+	}
+
+	list, err := store.ListDispatches(ctx, campaignID, 1)
+	if err != nil || len(list) == 0 {
+		return false
+	}
+
+	last := list[0]
+	if last.Status == DispatchRunning || last.FinishedAt.IsZero() {
+		return false
+	}
+
+	if !providerBlockText(last.Detail) {
+		return false
+	}
+
+	return time.Since(last.FinishedAt) < providerBlockCooldown
 }
 
 func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignID, email, status, errMsg string) {
@@ -945,15 +999,15 @@ func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignI
 	}
 }
 
-// nextPause is the wait after message index: a random 5-8s, or the fixed batch
-// gap after every mailBatchSize messages.
+// nextPause is the wait after message index: a random pause between messages,
+// or a longer random gap after every mailBatchSize messages.
 func (s *Service) nextPause(index, sent, failed, skipped int) (wait time.Duration, detail string) {
 	why := "before the next message"
 	wait = s.paceWait(mailMinWait, mailMaxWait)
 
 	if (index+1)%mailBatchSize == 0 {
 		why = "before the next batch"
-		wait = mailBatchGap
+		wait = s.paceWait(mailBatchMinGap, mailBatchMaxGap)
 	}
 
 	detail = fmt.Sprintf(

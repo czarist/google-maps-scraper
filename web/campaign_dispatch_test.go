@@ -71,9 +71,9 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 	}
 
 	for i, detail := range details {
-		want := "Waiting " + mailMinWait.String() + " before the next message"
+		want := "Waiting " + mailMinWait.Round(time.Second).String() + " before the next message"
 		if (i+1)%mailBatchSize == 0 {
-			want = "Waiting " + mailBatchGap.String() + " before the next batch"
+			want = "Waiting " + mailBatchMinGap.Round(time.Second).String() + " before the next batch"
 		}
 
 		if !strings.Contains(detail, want) {
@@ -103,6 +103,67 @@ func TestRunDispatchPacesEveryAddress(t *testing.T) {
 
 	if store.sent["camp"]["user00@example.com"] != MailStatusSent {
 		t.Fatalf("sent address status %q", store.sent["camp"]["user00@example.com"])
+	}
+}
+
+func TestRunDispatchStopsOnProviderBlock(t *testing.T) {
+	store := newMemStore()
+	store.dispatches = []Dispatch{{
+		ID:         "disp",
+		CampaignID: "camp",
+		Status:     DispatchRunning,
+		StartedAt:  time.Now().UTC(),
+	}}
+
+	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
+	svc.dispatchSleep = func(context.Context, time.Duration) {}
+
+	msgs := []renderedMail{
+		{To: "a@example.com", Subject: "Hi", Body: "Body"},
+		{To: "b@example.com", Subject: "Hi", Body: "Body"},
+		{To: "c@example.com", Subject: "Hi", Body: "Body"},
+	}
+
+	attempts := 0
+
+	send := func(_ context.Context, _ *MailConfig, msg *OutgoingMail) error {
+		attempts++
+
+		if msg.To == "b@example.com" {
+			return errors.New(`550 5.4.6 Unusual sending activity detected. UnblockMe`)
+		}
+
+		return nil
+	}
+
+	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, msgs, 0, 0, 0, send)
+
+	if attempts != 2 {
+		t.Fatalf("attempts %d, want 2", attempts)
+	}
+
+	if store.sent["camp"]["a@example.com"] != MailStatusSent {
+		t.Fatalf("first status %q", store.sent["camp"]["a@example.com"])
+	}
+
+	if _, ok := store.sent["camp"]["b@example.com"]; ok {
+		t.Fatal("blocked address was recorded")
+	}
+
+	if _, ok := store.sent["camp"]["c@example.com"]; ok {
+		t.Fatal("address after the block was recorded")
+	}
+
+	store.mu.Lock()
+	final := store.dispatches[0]
+	store.mu.Unlock()
+
+	if final.Status != DispatchFailed {
+		t.Fatalf("status %s", final.Status)
+	}
+
+	if !strings.Contains(final.Detail, "stay queued") || !providerBlockText(final.Detail) {
+		t.Fatalf("detail %s", final.Detail)
 	}
 }
 

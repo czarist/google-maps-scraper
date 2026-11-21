@@ -46,14 +46,18 @@ const (
 	// DefaultResendAfter is the default wait before an address can get the same campaign again.
 	DefaultResendAfter = 4 * 24 * time.Hour
 
-	// mailMinWait and mailMaxWait bound the random pause between two messages.
-	// +30% over the original 5-8s, to send a bit more cautiously.
-	mailMinWait = 6500 * time.Millisecond
-	mailMaxWait = 10400 * time.Millisecond
-	// mailBatchSize is how many messages go out before the batch pause.
+	// mailMinWait and mailMaxWait bound the random pause between two messages
+	// in a batch. Same window as lg-prospector's mailman intra-batch pause.
+	mailMinWait = 20 * time.Second
+	mailMaxWait = 75 * time.Second
+	// mailBatchSize is how many messages go out before the longer batch pause.
 	mailBatchSize = 20
-	// mailBatchGap is the pause after each full batch. +30% over the original 20s.
-	mailBatchGap = 26 * time.Second
+	// mailBatchMinGap and mailBatchMaxGap bound the random pause between batches.
+	mailBatchMinGap = 1 * time.Minute
+	mailBatchMaxGap = 3 * time.Minute
+	// providerBlockCooldown is how long automatic sending waits after Zoho
+	// refuses the account. A manual send still starts immediately.
+	providerBlockCooldown = 30 * time.Minute
 )
 
 // ErrDispatchRunning is returned when a campaign already has a send in progress.
