@@ -33,6 +33,8 @@ func NewProxyPool(proxies []string) (*ProxyPool, error) {
 			return nil, fmt.Errorf("failed to start auth proxy for %s: %w", p, err)
 		}
 
+		authProxy.pool = pool
+
 		pool.proxies = append(pool.proxies, authProxy)
 	}
 
@@ -47,6 +49,33 @@ func (pp *ProxyPool) Next() *AuthProxy {
 	pp.current++
 
 	return p
+}
+
+// Alternates returns up to n other proxies already in the pool (skipping
+// exclude), for a single CONNECT to fail over to when exclude's own upstream
+// is persistently rejecting it (e.g. a sustained 429). This does not affect
+// Next()'s own rotation, which still decides which proxy each new browser
+// gets assigned to for its whole session.
+func (pp *ProxyPool) Alternates(exclude *AuthProxy, n int) []*AuthProxy {
+	pp.mu.Lock()
+	defer pp.mu.Unlock()
+
+	if len(pp.proxies) <= 1 || n <= 0 {
+		return nil
+	}
+
+	out := make([]*AuthProxy, 0, n)
+
+	for i := 0; i < len(pp.proxies) && len(out) < n; i++ {
+		p := pp.proxies[(pp.current+i)%len(pp.proxies)]
+		if p == exclude {
+			continue
+		}
+
+		out = append(out, p)
+	}
+
+	return out
 }
 
 type proxyConfig struct {

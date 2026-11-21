@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gosom/scrapemate"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -80,11 +81,24 @@ var ErrNoProxies = errors.New("no working proxies: the job was not started so yo
 // With ProxyScrape there is no fallback: if the API fails or has no online
 // proxies, it returns ErrNoProxies instead of letting the job connect directly.
 func (s *Service) DefaultProxies(ctx context.Context) ([]string, error) {
+	return s.accountProxies(ctx, false)
+}
+
+// RefreshProxies re-fetches the ProxyScrape account's proxies instead of
+// using the (up to proxyScrapeCacheTTL old) cache. A job keeps its proxy list
+// from when it was created, so a job that ran through every proxy it was
+// given calls this before giving up, in case the account's pool has changed
+// since - rather than being stuck replaying the same list every retry.
+func (s *Service) RefreshProxies(ctx context.Context) ([]string, error) {
+	return s.accountProxies(ctx, true)
+}
+
+func (s *Service) accountProxies(ctx context.Context, refresh bool) ([]string, error) {
 	if s.proxyScrape == nil {
 		return s.SavedProxies()
 	}
 
-	proxies, err := s.proxyScrape.CachedProxies(ctx, false)
+	proxies, err := s.proxyScrape.CachedProxies(ctx, refresh)
 	if err != nil {
 		return nil, fmt.Errorf("%w (ProxyScrape: %s)", ErrNoProxies, err.Error())
 	}
@@ -165,7 +179,23 @@ func (s *Service) JobProxies(ctx context.Context, proxies []string) ([]string, e
 		}
 	}
 
+	// good keeps the same relative order across calls (the health cache always
+	// remembers the same proxies as good, in the order the input list gives
+	// them), so every job's own fresh browser.ProxyPool - which always starts
+	// picking from index 0 - would otherwise land on the exact same proxy as
+	// every other concurrently running job. Shuffle it so concurrent jobs
+	// spread out across the pool instead of piling connections onto one IP.
+	rand.Shuffle(len(good), func(a, b int) { good[a], good[b] = good[b], good[a] })
+
 	if len(good) == 0 {
+		// The sampled proxies all failed the preflight, but there may be hundreds
+		// more in the pool that were never even tried. Give those a chance instead
+		// of failing the whole job over one unlucky (or temporarily rate-limited)
+		// sample of proxyPreflightSample proxies.
+		if len(untested) > 0 {
+			return untested, nil
+		}
+
 		return nil, fmt.Errorf("%w (tested %d proxies, last error: %s)", ErrNoProxies, len(sample), lastErr)
 	}
 
@@ -339,6 +369,12 @@ func (s *Service) RemoveSavedProxies(proxies []string) ([]string, error) {
 	return kept, s.writeProxies(kept)
 }
 
+// proxyTestLimiter caps how fast testProxy hits Google across every job in the
+// queue combined. Without this, a large backlog keeps freeing worker slots
+// (a failed preflight is near-instant) and firing off new tests fast enough
+// to get the whole shared proxy pool rate-limited by Google at once.
+var proxyTestLimiter = rate.NewLimiter(rate.Limit(3), 5)
+
 // TestProxies requests Google Maps through each proxy, in parallel.
 func TestProxies(ctx context.Context, proxies []string) []ProxyCheck {
 	results := make([]ProxyCheck, len(proxies))
@@ -371,6 +407,12 @@ func testProxy(ctx context.Context, raw string) ProxyCheck {
 
 	proxyURL, err := url.Parse(raw)
 	if err != nil {
+		check.Error = err.Error()
+
+		return check
+	}
+
+	if err := proxyTestLimiter.Wait(ctx); err != nil {
 		check.Error = err.Error()
 
 		return check

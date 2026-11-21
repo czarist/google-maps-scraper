@@ -18,6 +18,97 @@ import (
 	"golang.org/x/net/proxy"
 )
 
+var (
+	connectMu       sync.Mutex
+	connectLastCall time.Time
+)
+
+// connectMinInterval spaces out upstream CONNECT attempts across every proxy
+// in the pool (a shared/rate-limited plan enforces its 429 account-wide, not
+// per exit IP), so a big batch of concurrently running jobs can't all dial
+// the upstream at once and trip its rate limit.
+const connectMinInterval = 250 * time.Millisecond
+
+// throttleConnect blocks until it is this goroutine's turn to dial the
+// upstream proxy, enforcing connectMinInterval globally for the process.
+func throttleConnect(ctx context.Context) error {
+	for {
+		connectMu.Lock()
+
+		wait := connectMinInterval - time.Since(connectLastCall)
+		if wait <= 0 {
+			connectLastCall = time.Now()
+
+			connectMu.Unlock()
+
+			return nil
+		}
+
+		connectMu.Unlock()
+
+		select {
+		case <-time.After(wait):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+}
+
+// maxConcurrentPerProxy caps how many upstream tunnels can be open at once
+// through a single exit IP. Chromium opens many simultaneous connections for
+// one page (every subresource: scripts, images, XHRs, ...), and since one
+// browser is pinned to one exit proxy for its whole session (ProxyPool.Next
+// is called once per browser, not per request), a single real Maps page load
+// alone easily exceeds a shared datacenter proxy's per-IP connection limit -
+// this is the 429 seen even with only one job running at a time. Queuing the
+// extra connections here instead of firing them all at once makes the page
+// load a bit slower but keeps it under the exit IP's own limit.
+//
+// This has to be keyed by the upstream address and shared process-wide, not
+// kept on the AuthProxy struct: every job builds its own ProxyPool with its
+// own fresh AuthProxy instances, so two different jobs that happen to pick
+// the same exit IP would otherwise each get their own independent budget for
+// the same real upstream connection limit.
+const maxConcurrentPerProxy = 6
+
+var (
+	connectSemsMu sync.Mutex
+	connectSems   = map[string]chan struct{}{}
+)
+
+func connectSemFor(upstream string) chan struct{} {
+	connectSemsMu.Lock()
+	defer connectSemsMu.Unlock()
+
+	sem, ok := connectSems[upstream]
+	if !ok {
+		sem = make(chan struct{}, maxConcurrentPerProxy)
+		connectSems[upstream] = sem
+	}
+
+	return sem
+}
+
+func acquireConnectSlotFor(ctx context.Context, upstreamHost string) error {
+	sem := connectSemFor(upstreamHost)
+
+	select {
+	case sem <- struct{}{}:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func releaseConnectSlotFor(upstreamHost string) {
+	sem := connectSemFor(upstreamHost)
+
+	select {
+	case <-sem:
+	default:
+	}
+}
+
 type ProxyType int
 
 const (
@@ -37,6 +128,7 @@ type AuthProxy struct {
 	logger     *log.Logger
 	shutdownCh chan struct{}
 	once       sync.Once
+	pool       *ProxyPool
 }
 
 // HTTPClient returns a client configured to use this proxy
@@ -268,6 +360,81 @@ func (p *AuthProxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// maxFailoverCandidates is how many other proxies already in the pool get
+// tried, through this same local listener, when the one this AuthProxy is
+// pinned to keeps rejecting CONNECT. The browser never notices: it only ever
+// talks to this one local address, whichever real exit IP ends up serving it.
+// Set fairly high because a shared datacenter plan's 429 is unpredictable per
+// IP - keep trying different exit IPs until one works. Bounded well below
+// the full pool size so one subresource request can't, in the worst case
+// (every candidate rejected), eat the whole job's time budget at
+// connectMinInterval pacing (25 * connectMinInterval here).
+const maxFailoverCandidates = 25
+
+// connectCandidate dials one candidate upstream and attempts the CONNECT.
+// With a shared datacenter plan, a 429 on one exit IP says little about the
+// next one, so this does not retry the same IP - handleHTTPConnect's caller
+// moves on to the next candidate instead, which cycles through many more
+// distinct exit IPs in the same amount of time than retrying one repeatedly
+// would. On success the returned connection's concurrency slot is already
+// held for cand.upstream.Host; the caller must release it once the tunnel is
+// done with releaseConnectSlotFor.
+func (p *AuthProxy) connectCandidate(r *http.Request, cand *AuthProxy) (net.Conn, error) {
+	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	defer cancel()
+
+	if err := acquireConnectSlotFor(ctx, cand.upstream.Host); err != nil {
+		return nil, err
+	}
+
+	if err := throttleConnect(ctx); err != nil {
+		releaseConnectSlotFor(cand.upstream.Host)
+
+		return nil, err
+	}
+
+	var d net.Dialer
+
+	conn, err := d.DialContext(ctx, "tcp", cand.upstream.Host)
+	if err != nil {
+		releaseConnectSlotFor(cand.upstream.Host)
+
+		return nil, fmt.Errorf("dial %s: %w", cand.upstream.Host, err)
+	}
+
+	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", r.Host, r.Host)
+	if cand.auth != "" {
+		connectReq += "Proxy-Authorization: Basic " + cand.auth + "\r\n"
+	}
+
+	connectReq += "\r\n"
+	if _, err = conn.Write([]byte(connectReq)); err != nil {
+		releaseConnectSlotFor(cand.upstream.Host)
+		conn.Close()
+
+		return nil, fmt.Errorf("write CONNECT to %s: %w", cand.upstream.Host, err)
+	}
+
+	resp, err := http.ReadResponse(bufio.NewReader(conn), r)
+	if err != nil {
+		releaseConnectSlotFor(cand.upstream.Host)
+		conn.Close()
+
+		return nil, fmt.Errorf("read CONNECT response from %s: %w", cand.upstream.Host, err)
+	}
+
+	resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return conn, nil
+	}
+
+	releaseConnectSlotFor(cand.upstream.Host)
+	conn.Close()
+
+	return nil, fmt.Errorf("upstream %s: %s", cand.upstream.Host, resp.Status)
+}
+
 func (p *AuthProxy) handleHTTPConnect(w http.ResponseWriter, r *http.Request) {
 	if r.Host == "" {
 		http.Error(w, "Missing host in CONNECT request", http.StatusBadRequest)
@@ -285,50 +452,37 @@ func (p *AuthProxy) handleHTTPConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
-	defer cancel()
+	candidates := []*AuthProxy{p}
+	if p.pool != nil {
+		candidates = append(candidates, p.pool.Alternates(p, maxFailoverCandidates)...)
+	}
 
-	var d net.Dialer
+	var (
+		upstreamConn  net.Conn
+		connectedHost string
+		lastErr       error
+	)
 
-	upstreamConn, err := d.DialContext(ctx, "tcp", p.upstream.Host)
-	if err != nil {
-		p.logger.Printf("Failed to connect to upstream: %v", err)
+	for _, cand := range candidates {
+		conn, connErr := p.connectCandidate(r, cand)
+		if connErr == nil {
+			upstreamConn = conn
+			connectedHost = cand.upstream.Host
+
+			break
+		}
+
+		lastErr = connErr
+	}
+
+	if upstreamConn == nil {
+		p.logger.Printf("All %d proxy candidate(s) rejected CONNECT for %s: %v", len(candidates), r.Host, lastErr)
 		http.Error(w, "Bad Gateway", http.StatusBadGateway)
 
 		return
 	}
 
-	connectReq := fmt.Sprintf("CONNECT %s HTTP/1.1\r\nHost: %s\r\n", r.Host, r.Host)
-	if p.auth != "" {
-		connectReq += "Proxy-Authorization: Basic " + p.auth + "\r\n"
-	}
-
-	connectReq += "\r\n"
-	if _, err = upstreamConn.Write([]byte(connectReq)); err != nil {
-		p.logger.Printf("Failed to send CONNECT request: %v", err)
-		http.Error(w, "Bad Gateway", http.StatusBadGateway)
-		upstreamConn.Close()
-
-		return
-	}
-
-	resp, err := http.ReadResponse(bufio.NewReader(upstreamConn), r)
-	if err != nil {
-		p.logger.Printf("Failed to parse CONNECT response: %v", err)
-		http.Error(w, "Bad Gateway", http.StatusBadGateway)
-		upstreamConn.Close()
-
-		return
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		p.logger.Printf("Upstream proxy rejected CONNECT: %s", resp.Status)
-		http.Error(w, "Proxy Authentication Required", http.StatusProxyAuthRequired)
-		upstreamConn.Close()
-
-		return
-	}
+	defer releaseConnectSlotFor(connectedHost)
 
 	p.tunnelConnection(w, r, upstreamConn)
 }

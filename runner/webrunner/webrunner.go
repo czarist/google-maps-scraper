@@ -331,6 +331,19 @@ func (w *webrunner) scrapeJob(ctx context.Context, job *web.Job) error {
 	}
 
 	healthy, err := w.svc.JobProxies(ctx, proxies)
+	if err != nil && len(w.cfg.Proxies) == 0 {
+		// This job's own proxy list (frozen since it was created, possibly
+		// several retries ago) is exhausted. Pull a fresh one from ProxyScrape
+		// before giving up - the account's pool may have changed since, and
+		// without this a job would just keep replaying the same dead list.
+		if fresh, refreshErr := w.svc.RefreshProxies(ctx); refreshErr == nil {
+			if healthy, err = w.svc.JobProxies(ctx, fresh); err == nil {
+				proxies = fresh
+				job.Data.Proxies = fresh
+			}
+		}
+	}
+
 	if err != nil {
 		log.Printf("job %s not started: %v", job.ID, err)
 

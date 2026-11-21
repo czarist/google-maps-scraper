@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"strings"
 	"time"
 )
 
@@ -13,10 +14,23 @@ const (
 	ErrMsgStuck = "stopped: the run went past its time limit and did not finish"
 )
 
+// proxyRetryDelay is the minimum wait before retrying a job that failed only
+// because no proxy could be confirmed working. It gives the proxy health
+// cache (proxyGoodFor/proxyBadFor in proxies.go) time to recover instead of
+// retrying straight back into a pool that was just marked bad account-wide.
+const proxyRetryDelay = 2 * time.Minute
+
 // retryDelay is how long a failed job waits before it can run again: 1 minute
 // after the first failure, 2 after the second. Other queued jobs go first.
-func retryDelay(attempts int) time.Duration {
-	return time.Duration(max(attempts, 1)) * time.Minute
+// A job that failed on ErrNoProxies waits at least proxyRetryDelay.
+func retryDelay(attempts int, lastErr string) time.Duration {
+	d := time.Duration(max(attempts, 1)) * time.Minute
+
+	if strings.Contains(lastErr, ErrNoProxies.Error()) {
+		d = max(d, proxyRetryDelay)
+	}
+
+	return d
 }
 
 // QueueRetry turns a failed run into another try at the end of the queue, unless
@@ -28,7 +42,7 @@ func QueueRetry(job *Job, now time.Time) bool {
 	}
 
 	job.Status = StatusPending
-	job.Data.Run.RetryAfter = now.Add(retryDelay(job.Data.Run.Attempts))
+	job.Data.Run.RetryAfter = now.Add(retryDelay(job.Data.Run.Attempts, job.Data.Run.Error))
 
 	return true
 }
