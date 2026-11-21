@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"golang.org/x/net/proxy"
@@ -321,6 +322,33 @@ func StartAuthProxy(proxyURL, username, password string) (*AuthProxy, error) {
 	return authProxy, nil
 }
 
+// freePortAttempts is how many times a local bind is retried when the
+// kernel reports the ephemeral port it just picked is already taken.
+const freePortAttempts = 5
+
+// listenFreePort binds 127.0.0.1:0. A single EADDRINUSE there is a race
+// with another bind, not proof that the port range is exhausted.
+func listenFreePort() (net.Listener, error) {
+	var err error
+
+	for attempt := range freePortAttempts {
+		var ln net.Listener
+
+		ln, err = net.Listen("tcp", "127.0.0.1:0")
+		if err == nil {
+			return ln, nil
+		}
+
+		if !errors.Is(err, syscall.EADDRINUSE) || attempt == freePortAttempts-1 {
+			return nil, err
+		}
+
+		time.Sleep(time.Duration(attempt+1) * 25 * time.Millisecond)
+	}
+
+	return nil, err
+}
+
 // listen binds one local port and serves the browser-facing proxy. The
 // listener is closed from Close even when Serve has not registered it yet:
 // http.Server.Shutdown returns immediately in that window and leaves the
@@ -334,7 +362,7 @@ func (p *AuthProxy) listen() error {
 		return err
 	}
 
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := listenFreePort()
 	if err != nil {
 		releaseListenerSlot()
 

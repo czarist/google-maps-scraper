@@ -49,7 +49,7 @@ func TestPauseResumeDispatchUsesNewSMTPSettings(t *testing.T) {
 	done := make(chan struct{})
 
 	go func() {
-		svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{Host: "old.example.com"}, msgs, 0, 0, 0, send)
+		svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{Host: "old.example.com"}, msgs, 0, 0, 0, send, 1)
 		close(done)
 	}()
 

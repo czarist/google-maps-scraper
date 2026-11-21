@@ -55,6 +55,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# The host clock is America/Sao_Paulo. The slim image has no zone data,
+# so without this the process log stays on UTC.
+RUN apt-get update && apt-get install -y --no-install-recommends tzdata \
+    && ln -sf /usr/share/zoneinfo/America/Sao_Paulo /etc/localtime \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+ENV TZ=America/Sao_Paulo
+
 COPY --from=playwright-deps /opt/browsers /opt/browsers
 COPY --from=playwright-deps /opt/ms-playwright-go /opt/ms-playwright-go
 

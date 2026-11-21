@@ -160,21 +160,27 @@ func TestNewProxyPoolReleasesSlotsWhenTheCapStopsIt(t *testing.T) {
 	maxProcessListeners.Store(before + 2)
 	t.Cleanup(func() { maxProcessListeners.Store(prev) })
 
-	_, err := NewProxyPool([]string{
+	pool, err := NewProxyPool([]string{
 		"http://user:secret@192.0.2.1:3129",
 		"http://user:secret@192.0.2.2:3129",
 		"http://user:secret@192.0.2.3:3129",
 	})
-	if err == nil {
-		t.Fatal("expected the process cap to reject the pool")
+	if err != nil {
+		t.Fatalf("pool should keep the listeners that opened: %v", err)
 	}
 
-	if strings.Contains(err.Error(), "user") || strings.Contains(err.Error(), "secret") {
-		t.Fatalf("proxy credentials in error: %v", err)
+	t.Cleanup(func() { _ = pool.Close() })
+
+	if got, want := len(pool.listening), 2; got != want {
+		t.Fatalf("listening = %d, want %d", got, want)
+	}
+
+	if err := pool.Close(); err != nil {
+		t.Fatalf("close: %v", err)
 	}
 
 	if got := liveListeners.Load(); got != before {
-		t.Fatalf("failed pool leaked listeners: live=%d before=%d", got, before)
+		t.Fatalf("pool leaked listeners: live=%d before=%d", got, before)
 	}
 }
 

@@ -106,19 +106,28 @@ func WithMaxDistance(meters float64) GmapJobOptions {
 }
 
 // searchCenter returns the point distances are measured from.
-func (j *GmapJob) searchCenter(resp *scrapemate.Response) (latLon, bool) {
+//
+// Coordinates typed for the job win. Otherwise the map URL is used when it
+// sits in the same area as the results. Through a proxy the map often stays
+// centered on another country while every result is local; that hint is
+// dropped and the result cluster is used instead.
+func (j *GmapJob) searchCenter(resp *scrapemate.Response, points []latLon) (latLon, bool) {
 	if j.hasCenter {
 		return j.center, true
 	}
 
-	u, _ := resp.Meta[searchURLMetaKey].(string)
-	if c, ok := viewportCenter(u); ok {
-		return c, true
+	hint, hasHint := mapHintCenter(resp)
+	cluster, hasCluster := medianCenter(points)
+
+	if hasHint && hasCluster && j.MaxDistance > 0 && distanceMeters(hint, cluster) > j.MaxDistance {
+		return cluster, true
 	}
 
-	c, ok := resp.Meta[searchCenterMetaKey].(latLon)
+	if hasHint {
+		return hint, true
+	}
 
-	return c, ok
+	return cluster, hasCluster
 }
 
 func WithDeduper(d deduper.Deduper) GmapJobOptions {
@@ -200,20 +209,30 @@ func (j *GmapJob) Process(ctx context.Context, resp *scrapemate.Response) (any, 
 
 		next = append(next, placeJob)
 	} else {
-		center, filterByDistance := j.searchCenter(resp)
-		if !filterByDistance && j.MaxDistance > 0 {
-			// Last resort: the median of the results. A few far places cannot move it.
-			center, filterByDistance = medianCenter(feedPlaceCoords(doc))
-			if filterByDistance {
-				log.Info("search center taken from the median of the results")
-			}
+		points := feedPlaceCoords(doc)
+		hint, hasHint := mapHintCenter(resp)
+		center, filterByDistance := j.searchCenter(resp, points)
+
+		if filterByDistance && hasHint && (center.Lat != hint.Lat || center.Lon != hint.Lon) {
+			log.Info("map center is far from the results; measuring from the results")
 		}
 
 		filterByDistance = filterByDistance && j.MaxDistance > 0
 		tooFar := 0
 
-		if j.MaxDistance > 0 && !filterByDistance {
-			log.Info(fmt.Sprintf("search center unknown, distance filter skipped (url %v)", resp.Meta[searchURLMetaKey]))
+		// A center that rejects every result is the proxy's map, or a bad
+		// coordinate in the links. Keeping nothing makes the job look blocked
+		// and it retries forever. An explicit center is the caller's radius.
+		if filterByDistance && !j.hasCenter && len(points) > 0 && !anyWithin(points, center, j.MaxDistance) {
+			log.Info(fmt.Sprintf("distance filter would drop every result; keeping %d", len(points)))
+			filterByDistance = false
+		} else if j.MaxDistance > 0 && !filterByDistance {
+			var searchURL any
+			if resp.Meta != nil {
+				searchURL = resp.Meta[searchURLMetaKey]
+			}
+
+			log.Info(fmt.Sprintf("search center unknown, distance filter skipped (url %v)", searchURL))
 		}
 
 		doc.Find(feedLinkSelector).Each(func(_ int, s *goquery.Selection) {

@@ -1846,6 +1846,161 @@ tr.is-new td {
     width: 6rem;
 }
 
+.at-once {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.at-once input[type="number"] {
+    width: 5.5rem;
+}
+
+.sender-board {
+    margin: 0 0 22px;
+    padding: 18px 20px 8px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    background: var(--inset);
+}
+
+.sender-board h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 6px;
+}
+
+.sender-list {
+    list-style: none;
+    margin: 12px 0 0;
+    padding: 0;
+}
+
+.sender-list > li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 0;
+    border-top: 1px solid var(--line);
+}
+
+.sender-list > li:first-child {
+    border-top: 0;
+}
+
+.sender-counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+    margin: 0;
+    font-weight: 600;
+}
+
+.sender-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.sender-actions form {
+    display: inline-flex;
+    margin: 0;
+}
+
+.sender-failed {
+    color: var(--pin);
+}
+
+.sender-errors {
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0;
+}
+
+.sender-errors li {
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+}
+
+.sender-errors li:first-child {
+    border-top: 0;
+}
+
+.sender-error-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.sender-error-head strong {
+    overflow-wrap: anywhere;
+}
+
+.sender-errors p {
+    margin: 4px 0 0;
+    overflow-wrap: anywhere;
+}
+
+.smtp-extra {
+    margin: 18px 0 22px;
+    padding: 18px 20px 20px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-panel);
+    background: var(--inset);
+}
+
+.smtp-extra h3 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 6px;
+}
+
+.smtp-order {
+    list-style: none;
+    margin: 12px 0 16px;
+    padding: 0;
+}
+
+.smtp-order li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 10px 0;
+    border-top: 1px solid var(--line);
+}
+
+.smtp-order li:first-child {
+    border-top: 0;
+}
+
+.smtp-who {
+    min-width: 0;
+}
+
+.smtp-who strong {
+    display: block;
+    overflow-wrap: anywhere;
+}
+
+.smtp-who .hint {
+    margin: 0;
+}
+
+.smtp-add {
+    margin-top: 8px;
+}
+
+.smtp-add .submit-row {
+    margin-top: 16px;
+}
+
 /* Automatic sending settings on the campaign page. */
 .auto-dispatch {
     margin-top: 24px;

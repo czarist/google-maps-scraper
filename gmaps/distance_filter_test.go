@@ -34,6 +34,10 @@ func TestPlaceCoordsAndViewport(t *testing.T) {
 	if _, ok := parseGeoCoordinates("0,0"); ok {
 		t.Fatal("0,0 must count as unset")
 	}
+
+	if _, ok := viewportCenter("https://www.google.com/maps/search/x/@0,0,2z"); ok {
+		t.Fatal("0,0 viewport must count as unset")
+	}
 }
 
 func TestProcessDropsFarPlaces(t *testing.T) {
@@ -103,4 +107,98 @@ func TestProcessFallsBackToMedianCenter(t *testing.T) {
 	if len(next) != 3 {
 		t.Fatalf("kept %d places, want 3 (Salvador dropped)", len(next))
 	}
+}
+
+func TestProcessIgnoresMapCenterFarFromResults(t *testing.T) {
+	html := `<div role="feed">` +
+		`<div jsaction="x"><a href="` + poaPlace + `"></a></div>` +
+		`<div jsaction="x"><a href="` + canoas + `"></a></div>` +
+		`<div jsaction="x"><a href="` + poaPlace + `?2"></a></div>` +
+		`<div jsaction="x"><a href="` + salvador + `"></a></div>` +
+		`</div>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := NewGmapJob("", "pt", "escolas porto alegre", 1, false, "", 0, WithMaxDistance(50000))
+	resp := &scrapemate.Response{
+		URL:      job.URL,
+		Document: doc,
+		Meta: map[string]any{
+			searchURLMetaKey: "https://www.google.com/maps/search/escolas+porto+alegre/@39.8283,-98.5795,4z",
+		},
+	}
+
+	_, next, err := job.Process(context.Background(), resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(next) != 3 {
+		t.Fatalf("kept %d places, want 3 (Salvador dropped, Porto Alegre kept)", len(next))
+	}
+}
+
+func TestProcessKeepsAResultTheMapCenterRejects(t *testing.T) {
+	html := `<div role="feed"><div jsaction="x"><a href="` + salvador + `"></a></div></div>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := NewGmapJob("", "pt", "padaria em São Paulo", 1, false, "", 0, WithMaxDistance(5000))
+	resp := &scrapemate.Response{
+		URL:      job.URL,
+		Document: doc,
+		Meta: map[string]any{
+			searchURLMetaKey: "https://www.google.com/maps/search/padaria/@39.8283,-98.5795,4z",
+		},
+	}
+
+	_, next, err := job.Process(context.Background(), resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(next) != 1 {
+		t.Fatalf("kept %d places, want the only result", len(next))
+	}
+}
+
+func TestExplicitCenterStillDropsFarPlaces(t *testing.T) {
+	html := `<div role="feed">` +
+		`<div jsaction="x"><a href="` + poaPlace + `"></a></div>` +
+		`<div jsaction="x"><a href="` + canoas + `"></a></div>` +
+		`<div jsaction="x"><a href="` + salvador + `"></a></div>` +
+		`<div jsaction="x"><a href="` + noCoords + `"></a></div>` +
+		`</div>`
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	job := NewGmapJob("", "pt", "escolas salvador", 1, false, "-12.9714,-38.5014", 12, WithMaxDistance(50000))
+
+	_, next, err := job.Process(context.Background(), &scrapemate.Response{URL: job.URL, Document: doc})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got := strings.Join(placeURLs(next), " ")
+	if len(next) != 2 || strings.Contains(got, "Escola+A") || strings.Contains(got, "Escola+B") {
+		t.Fatalf("kept %v, want Salvador and the place without coordinates", got)
+	}
+}
+
+func placeURLs(jobs []scrapemate.IJob) []string {
+	out := make([]string, 0, len(jobs))
+	for _, n := range jobs {
+		out = append(out, n.(*PlaceJob).URL)
+	}
+
+	return out
 }

@@ -112,7 +112,7 @@ func TestDispatchSkipsAddressUnsubscribedFromCampaignService(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newGateService(store, list)
 
-	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("fulano@empresa.com", "outro@empresa.com"), 0, 0, 0, sender.send)
+	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("fulano@empresa.com", "outro@empresa.com"), 0, 0, 0, sender.send, 1)
 
 	if got := sender.to(); len(got) != 1 || got[0] != "outro@empresa.com" {
 		t.Fatalf("sent to %v, want only outro@empresa.com", got)
@@ -150,7 +150,7 @@ func TestUnsubscribeAppliesToOneServiceOnly(t *testing.T) {
 			sender := &recordingSender{}
 			svc := newGateService(store, list)
 
-			svc.runDispatch("camp", "disp", service, &MailConfig{}, queue("fulano@empresa.com"), 0, 0, 0, sender.send)
+			svc.runDispatch("camp", "disp", service, &MailConfig{}, queue("fulano@empresa.com"), 0, 0, 0, sender.send, 1)
 
 			if got := sender.to(); len(got) != 1 {
 				t.Fatalf("sent %v, want the address to receive %s mail", got, service)
@@ -182,7 +182,7 @@ func TestQueuedMessageIsBlockedWhenUnsubscribeArrivesLater(t *testing.T) {
 		return sender.send(ctx, cfg, msg)
 	}
 
-	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("primeiro@empresa.com", "segundo@empresa.com"), 0, 0, 0, send)
+	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("primeiro@empresa.com", "segundo@empresa.com"), 0, 0, 0, send, 1)
 
 	if got := sender.to(); len(got) != 1 || got[0] != "primeiro@empresa.com" {
 		t.Fatalf("sent %v", got)
@@ -201,7 +201,7 @@ func TestLookupFailureSuspendsAndKeepsQueue(t *testing.T) {
 	sender := &recordingSender{}
 	svc := newGateService(store, list)
 
-	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("a@empresa.com", "b@empresa.com", "c@empresa.com"), 0, 0, 0, sender.send)
+	svc.runDispatch("camp", "disp", ServiceTrentin, &MailConfig{}, queue("a@empresa.com", "b@empresa.com", "c@empresa.com"), 0, 0, 0, sender.send, 1)
 
 	if got := sender.to(); len(got) != 0 {
 		t.Fatalf("provider called for %v", got)

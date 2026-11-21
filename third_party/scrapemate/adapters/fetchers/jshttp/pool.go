@@ -2,6 +2,7 @@ package jshttp
 
 import (
 	"fmt"
+	"log"
 	"math/rand/v2"
 	"net/url"
 	"sync"
@@ -69,13 +70,27 @@ func NewProxyPool(proxies []string) (*ProxyPool, error) {
 	}
 
 	n := min(len(pool.proxies), maxListeningProxies)
+	var bindErr error
+
 	for i := range n {
 		authProxy := pool.proxies[(start+i)%len(pool.proxies)]
 		if err := authProxy.listen(); err != nil {
-			return nil, fmt.Errorf("failed to start auth proxy for %s: %w", redactProxyURL(proxies[(start+i)%len(proxies)]), err)
+			// One bind failure used to fail the job. Keep the listeners
+			// already open and dial the rest directly, unless none opened.
+			bindErr = fmt.Errorf("failed to start auth proxy for %s: %w", redactProxyURL(proxies[(start+i)%len(proxies)]), err)
+
+			break
 		}
 
 		pool.listening = append(pool.listening, authProxy)
+	}
+
+	if len(pool.listening) == 0 {
+		return nil, bindErr
+	}
+
+	if bindErr != nil {
+		log.Printf("auth proxy bound %d of %d local listeners: %v", len(pool.listening), n, bindErr)
 	}
 
 	started = true

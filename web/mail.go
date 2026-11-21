@@ -387,7 +387,7 @@ func prepareSMTPClient(ctx context.Context, cfg *MailConfig) (*smtp.Client, erro
 		return nil, err
 	}
 
-	if cfg.Encryption == MailStartTLS {
+	if cfg.Encryption == MailStartTLS && !smtpImplicitTLS(cfg) {
 		tlsCfg := &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12}
 		if err := client.StartTLS(tlsCfg); err != nil {
 			_ = client.Close()
@@ -415,6 +415,16 @@ func smtpAuth(cfg *MailConfig) smtp.Auth {
 	return smtp.PlainAuth("", cfg.Username, cfg.Password, cfg.Host)
 }
 
+// smtpImplicitTLS reports a connection that must handshake TLS before SMTP.
+// Port 465 is that kind of port even when the form still says STARTTLS.
+func smtpImplicitTLS(cfg *MailConfig) bool {
+	if cfg == nil {
+		return false
+	}
+
+	return cfg.Encryption == MailSSL || (cfg.Port == 465 && cfg.Encryption == MailStartTLS)
+}
+
 func dialSMTP(ctx context.Context, cfg *MailConfig) (*smtp.Client, error) {
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
 	dialer := &net.Dialer{Timeout: 20 * time.Second}
@@ -424,7 +434,7 @@ func dialSMTP(ctx context.Context, cfg *MailConfig) (*smtp.Client, error) {
 		return nil, err
 	}
 
-	if cfg.Encryption == MailSSL {
+	if smtpImplicitTLS(cfg) {
 		tlsConn := tls.Client(conn, &tls.Config{ServerName: cfg.Host, MinVersion: tls.VersionTLS12})
 		if err := tlsConn.HandshakeContext(ctx); err != nil {
 			_ = conn.Close()

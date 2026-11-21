@@ -29,7 +29,7 @@ type campaignsView struct {
 
 // waitingSentence is the "Waiting 8s before the next message." part of a
 // dispatch detail, replaced on the page by a live countdown.
-var waitingSentence = regexp.MustCompile(`\s*Waiting \S+ before the next (message|batch)\.`)
+var waitingSentence = regexp.MustCompile(`\s*Waiting \S+ before the next (message|emails|batch)\.`)
 
 type campaignView struct {
 	Campaign      Campaign
@@ -48,6 +48,7 @@ type campaignView struct {
 	// NextSendMS is how long until the next email, for the live countdown.
 	NextSendMS     int64
 	NextIsBatch    bool
+	NextAreEmails  bool
 	PreviewWarning string
 	Auto           AutoDispatch
 	Stats          CampaignStats
@@ -62,6 +63,10 @@ type campaignView struct {
 	HistoryPager    Pager
 	PagedMailLog    []MailLogEntry
 	MailPager       Pager
+	// SMTP is the extra servers, in send order. Passwords are cleared.
+	SMTP []SMTPAccount
+	// Senders is the campaign server plus the extra servers, with their counts.
+	Senders []SenderCard
 	// PageQuery keeps the pages and order above in the live refresh.
 	PageQuery string
 }
@@ -296,13 +301,15 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 	// While the run waits, the page counts down to the next email itself, so
 	// the fixed "Waiting 8s" sentence is dropped from the detail.
 	var (
-		nextSendMS  int64
-		nextIsBatch bool
+		nextSendMS    int64
+		nextIsBatch   bool
+		nextAreEmails bool
 	)
 
 	if next := s.svc.NextDispatchSend(id); running && !next.IsZero() {
 		nextSendMS = max(time.Until(next).Milliseconds(), 0)
 		nextIsBatch = strings.Contains(runningDetail, "before the next batch")
+		nextAreEmails = strings.Contains(runningDetail, "before the next emails")
 		runningDetail = waitingSentence.ReplaceAllString(runningDetail, "")
 	}
 
@@ -318,6 +325,7 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 		RunningDetail:  runningDetail,
 		NextSendMS:     nextSendMS,
 		NextIsBatch:    nextIsBatch,
+		NextAreEmails:  nextAreEmails,
 		Notice:         queryMessage(r, "notice"),
 		Error:          queryMessage(r, "error"),
 		Running:        running,
@@ -329,6 +337,24 @@ func (s *Server) loadCampaignView(r *http.Request, id string) (campaignView, err
 	if view.Auto, err = s.svc.GetAutoDispatch(r.Context(), id); err != nil {
 		log.Printf("auto dispatch setting %s: %v", id, err)
 	}
+
+	if view.SMTP, err = s.svc.ListSMTPAccounts(r.Context(), id); err != nil {
+		log.Printf("smtp accounts %s: %v", id, err)
+		view.SMTP = nil
+	}
+
+	for i := range view.SMTP {
+		view.SMTP[i].PasswordSet = view.SMTP[i].Password != ""
+		view.SMTP[i].Password = ""
+	}
+
+	senderLog, err := s.svc.SenderLog(r.Context(), id)
+	if err != nil {
+		log.Printf("sender log %s: %v", id, err)
+		senderLog = nil
+	}
+
+	view.Senders = senderCards(view.Mail, passwordSet, view.SMTP, senderLog)
 
 	pageCampaignView(&view, r)
 
@@ -342,11 +368,17 @@ func (s *Server) campaignAuto(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
+		current, err := s.svc.GetAutoDispatch(r.Context(), id)
+		if err != nil {
+			return err
+		}
+
 		days := DefaultResendAfter
 		a := AutoDispatch{
 			Enabled:         r.Form.Get("auto_enabled") == formChecked,
 			Resend:          r.Form.Get("auto_resend") == formChecked,
 			ResendAfterDays: int(days / (24 * time.Hour)),
+			AtOnce:          current.AtOnce,
 		}
 
 		if raw := strings.TrimSpace(r.Form.Get("auto_resend_after_days")); raw != "" {
@@ -356,6 +388,17 @@ func (s *Server) campaignAuto(w http.ResponseWriter, r *http.Request) {
 			}
 
 			a.ResendAfterDays = n
+		}
+
+		// The number lives on the send form. When it is copied here, keep it.
+		// When this form omits it, the saved number stays.
+		if r.Form.Has("send_at_once") {
+			n, err := parseAtOnce(r.Form.Get("send_at_once"))
+			if err != nil {
+				return err
+			}
+
+			a.AtOnce = n
 		}
 
 		if err := s.svc.SaveAutoDispatch(r.Context(), id, a); err != nil {
@@ -368,6 +411,180 @@ func (s *Server) campaignAuto(w http.ResponseWriter, r *http.Request) {
 
 		return errNotice("Automatic sending is off.")
 	}, "")
+}
+
+// campaignSMTPAdd stores one more SMTP server for the same campaign message.
+func (s *Server) campaignSMTPAdd(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		account, err := smtpAccountFromForm(r)
+		if err != nil {
+			return err
+		}
+
+		if err := s.svc.AddSMTPAccount(r.Context(), id, &account); err != nil {
+			return err
+		}
+
+		return errNotice("SMTP server added. It sends the same message.")
+	}, "")
+}
+
+// campaignSMTPRemove deletes one extra SMTP server.
+func (s *Server) campaignSMTPRemove(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		if err := r.ParseForm(); err != nil {
+			return err
+		}
+
+		if err := s.svc.DeleteSMTPAccount(r.Context(), id, r.Form.Get("smtp_id")); err != nil {
+			return err
+		}
+
+		return errNotice("SMTP server removed.")
+	}, "")
+}
+
+// campaignSenderSave creates a sender or updates one. smtp_id "primary" is the
+// first sender. An empty id adds a sender. POST /campaigns/{id}/senders/save
+func (s *Server) campaignSenderSave(w http.ResponseWriter, r *http.Request) {
+	s.postCampaign(w, r, func(id string) error {
+		account, senderID, err := senderAccountFromForm(r)
+		if err != nil {
+			return err
+		}
+
+		switch senderID {
+		case "":
+			if err := s.svc.AddSMTPAccount(r.Context(), id, &account); err != nil {
+				return err
+			}
+
+			return errNotice("Sender added.")
+		case "primary":
+			if err := s.svc.SavePrimarySender(r.Context(), id, &account); err != nil {
+				return err
+			}
+		default:
+			account.ID = senderID
+			if err := s.svc.UpdateSMTPAccount(r.Context(), id, &account); err != nil {
+				return err
+			}
+		}
+
+		return errNotice("Sender saved.")
+	}, "")
+}
+
+// campaignSenderCheck dials one saved sender. POST /campaigns/{id}/senders/check
+func (s *Server) campaignSenderCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMailJSON(w, http.StatusMethodNotAllowed, &mailJSON{Error: methodNotAllowedMessage})
+
+		return
+	}
+
+	id, err := campaignIDFromRequest(r)
+	if err != nil {
+		writeMailJSON(w, http.StatusUnprocessableEntity, &mailJSON{Error: "invalid campaign"})
+
+		return
+	}
+
+	if err := r.ParseForm(); err != nil {
+		writeMailJSON(w, http.StatusUnprocessableEntity, &mailJSON{Error: trFrom(r, publicErr(err))})
+
+		return
+	}
+
+	if err := s.svc.CheckSender(r.Context(), id, r.Form.Get("smtp_id")); err != nil {
+		writeMailJSON(w, http.StatusOK, &mailJSON{OK: false, Error: trFrom(r, publicErr(err))})
+
+		return
+	}
+
+	writeMailJSON(w, http.StatusOK, &mailJSON{OK: true, Notice: trFrom(r, "SMTP connection succeeded.")})
+}
+
+func senderAccountFromForm(r *http.Request) (SMTPAccount, string, error) {
+	if err := r.ParseForm(); err != nil {
+		return SMTPAccount{}, "", err
+	}
+
+	port := defaultSMTPPort
+
+	if raw := strings.TrimSpace(r.Form.Get("sender_port")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return SMTPAccount{}, "", errors.New("invalid SMTP port")
+		}
+
+		port = n
+	}
+
+	account := SMTPAccount{
+		Host:       r.Form.Get("sender_host"),
+		Port:       port,
+		Username:   r.Form.Get("sender_username"),
+		Password:   r.Form.Get("sender_password"),
+		Encryption: MailEncryption(r.Form.Get("sender_encryption")),
+		FromEmail:  r.Form.Get("sender_from_email"),
+		FromName:   r.Form.Get("sender_from_name"),
+	}
+
+	return account.Normalize(), strings.TrimSpace(r.Form.Get("smtp_id")), nil
+}
+
+// applyTestSender copies the picked sender onto a test message. The subject and
+// body stay on the posted message.
+func (s *Server) applyTestSender(r *http.Request, campaignID string, cfg *MailConfig) error {
+	sender, err := s.svc.SenderMail(r.Context(), campaignID, r.Form.Get("test_sender"))
+	if err != nil {
+		return err
+	}
+
+	cfg.Host = sender.Host
+	cfg.Port = sender.Port
+	cfg.Username = sender.Username
+	cfg.Password = sender.Password
+	cfg.Encryption = sender.Encryption
+	cfg.FromEmail = sender.FromEmail
+	cfg.FromName = sender.FromName
+
+	return nil
+}
+
+func smtpAccountFromForm(r *http.Request) (SMTPAccount, error) {
+	if err := r.ParseForm(); err != nil {
+		return SMTPAccount{}, err
+	}
+
+	port := defaultSMTPPort
+
+	if raw := strings.TrimSpace(r.Form.Get("extra_smtp_port")); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil {
+			return SMTPAccount{}, errors.New("invalid SMTP port")
+		}
+
+		port = n
+	}
+
+	account := SMTPAccount{
+		Host:       r.Form.Get("extra_smtp_host"),
+		Port:       port,
+		Username:   r.Form.Get("extra_smtp_username"),
+		Password:   r.Form.Get("extra_smtp_password"),
+		Encryption: MailEncryption(r.Form.Get("extra_encryption")),
+		FromEmail:  r.Form.Get("extra_from_email"),
+		FromName:   r.Form.Get("extra_from_name"),
+	}
+	account = account.Normalize()
+
+	if err := account.Validate(); err != nil {
+		return SMTPAccount{}, err
+	}
+
+	return account, nil
 }
 
 func (s *Server) campaignRename(w http.ResponseWriter, r *http.Request) {
@@ -476,13 +693,17 @@ func (s *Server) campaignMail(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 
-		return s.svc.SaveCampaignMail(r.Context(), id, &cfg)
+		return s.svc.SaveCampaignMessage(r.Context(), id, cfg.Subject, cfg.Body, cfg.Format)
 	}, "Email settings saved")
 }
 
 func (s *Server) campaignMailTest(w http.ResponseWriter, r *http.Request) {
 	if wantsMailJSON(r) {
 		s.campaignMailJSON(w, r, func(id string, cfg MailConfig) mailJSON {
+			if err := s.applyTestSender(r, id, &cfg); err != nil {
+				return mailJSON{OK: false, Error: trFrom(r, publicErr(err))}
+			}
+
 			if err := s.svc.SendTestMail(r.Context(), id, &cfg, r.Form.Get("test_to"), s.sendMail); err != nil {
 				return mailJSON{OK: false, Error: trFrom(r, publicErr(err))}
 			}
@@ -496,6 +717,10 @@ func (s *Server) campaignMailTest(w http.ResponseWriter, r *http.Request) {
 	s.postCampaign(w, r, func(id string) error {
 		cfg, err := mailConfigFromForm(r)
 		if err != nil {
+			return err
+		}
+
+		if err := s.applyTestSender(r, id, &cfg); err != nil {
 			return err
 		}
 
@@ -570,6 +795,22 @@ func wantsMailJSON(r *http.Request) bool {
 	return strings.Contains(r.Header.Get("Accept"), "application/json")
 }
 
+// parseAtOnce reads how many emails leave together. Empty means one.
+// There is no maximum.
+func parseAtOnce(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 1, nil
+	}
+
+	n, err := strconv.Atoi(raw)
+	if err != nil || n < 1 {
+		return 0, errors.New("send at once must be a whole number, 1 or more")
+	}
+
+	return n, nil
+}
+
 func (s *Server) campaignDispatch(w http.ResponseWriter, r *http.Request) {
 	s.postCampaign(w, r, func(id string) error {
 		if err := r.ParseForm(); err != nil {
@@ -586,7 +827,20 @@ func (s *Server) campaignDispatch(w http.ResponseWriter, r *http.Request) {
 			resendAfter = time.Duration(days) * 24 * time.Hour
 		}
 
-		result, err := s.svc.StartDispatch(r.Context(), id, r.Form.Get("resend") == formChecked, resendAfter, s.sendMail)
+		atOnce, err := parseAtOnce(r.Form.Get("send_at_once"))
+		if err != nil {
+			return err
+		}
+
+		if err := s.svc.SetSendAtOnce(r.Context(), id, atOnce); err != nil {
+			log.Printf("save send at once %s: %v", id, err) //nolint:gosec // G706: id is a parsed UUID.
+		}
+
+		result, err := s.svc.startDispatch(r.Context(), id, DispatchOptions{
+			Resend:      r.Form.Get("resend") == formChecked,
+			ResendAfter: resendAfter,
+			AtOnce:      atOnce,
+		}, s.sendMail)
 		if err != nil {
 			return err
 		}

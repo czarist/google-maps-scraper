@@ -74,11 +74,25 @@ func ensureCampaignSchema(db *sql.DB) error {
 		CREATE INDEX IF NOT EXISTS idx_campaign_dispatches_campaign
 			ON campaign_dispatches (campaign_id, started_at);
 
+		CREATE TABLE IF NOT EXISTS campaign_sender_log (
+			campaign_id TEXT NOT NULL,
+			email TEXT NOT NULL,
+			status TEXT NOT NULL,
+			error TEXT NOT NULL DEFAULT '',
+			from_email TEXT NOT NULL DEFAULT '',
+			sent_at INT NOT NULL,
+			FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
+		);
+
+		CREATE INDEX IF NOT EXISTS idx_campaign_sender_log
+			ON campaign_sender_log (campaign_id, sent_at);
+
 		CREATE TABLE IF NOT EXISTS campaign_auto (
 			campaign_id TEXT PRIMARY KEY,
 			enabled INT NOT NULL DEFAULT 0,
 			resend INT NOT NULL DEFAULT 0,
 			resend_after_days INT NOT NULL DEFAULT 4,
+			parallel INT NOT NULL DEFAULT 1,
 			updated_at INT NOT NULL,
 			FOREIGN KEY (campaign_id) REFERENCES campaigns(id) ON DELETE CASCADE
 		);
@@ -88,6 +102,18 @@ func ensureCampaignSchema(db *sql.DB) error {
 	}
 
 	if err := addMailFormatColumn(db); err != nil {
+		return err
+	}
+
+	if err := addAutoParallelColumn(db); err != nil {
+		return err
+	}
+
+	if err := ensureSMTPAccountSchema(db); err != nil {
+		return err
+	}
+
+	if err := addMailLogFromColumn(db); err != nil {
 		return err
 	}
 
@@ -129,6 +155,26 @@ func ensureServiceSchema(db *sql.DB) error {
 // addMailFormatColumn upgrades databases created before HTML bodies existed.
 func addMailFormatColumn(db *sql.DB) error {
 	_, err := db.Exec(`ALTER TABLE campaign_mail ADD COLUMN format TEXT NOT NULL DEFAULT 'plain'`)
+	if err == nil || strings.Contains(err.Error(), "duplicate column") {
+		return nil
+	}
+
+	return err
+}
+
+// addMailLogFromColumn stores which sender address produced each result.
+func addMailLogFromColumn(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE campaign_mail_log ADD COLUMN from_email TEXT NOT NULL DEFAULT ''`)
+	if err == nil || strings.Contains(err.Error(), "duplicate column") {
+		return nil
+	}
+
+	return err
+}
+
+// addAutoParallelColumn stores how many campaign emails leave at the same time.
+func addAutoParallelColumn(db *sql.DB) error {
+	_, err := db.Exec(`ALTER TABLE campaign_auto ADD COLUMN parallel INT NOT NULL DEFAULT 1`)
 	if err == nil || strings.Contains(err.Error(), "duplicate column") {
 		return nil
 	}
@@ -251,9 +297,11 @@ func (repo *repo) DeleteCampaign(ctx context.Context, id string) error {
 
 	for _, q := range []string{
 		`DELETE FROM campaign_mail_log WHERE campaign_id = ?`,
+		`DELETE FROM campaign_sender_log WHERE campaign_id = ?`,
 		`DELETE FROM campaign_dispatches WHERE campaign_id = ?`,
 		`DELETE FROM campaign_mail WHERE campaign_id = ?`,
 		`DELETE FROM campaign_jobs WHERE campaign_id = ?`,
+		`DELETE FROM campaign_smtp WHERE campaign_id = ?`,
 	} {
 		if _, err := tx.ExecContext(ctx, q, id); err != nil {
 			return err
@@ -520,7 +568,7 @@ func scanEmails(rows *sql.Rows) (map[string]struct{}, error) {
 // MailLog returns the latest send result per address, newest first.
 func (repo *repo) MailLog(ctx context.Context, campaignID string) ([]web.MailLogEntry, error) {
 	rows, err := repo.db.QueryContext(ctx, `
-		SELECT email, status, error, sent_at FROM campaign_mail_log
+		SELECT email, status, error, from_email, sent_at FROM campaign_mail_log
 		WHERE campaign_id = ?
 		ORDER BY sent_at DESC, email
 	`, campaignID)
@@ -540,7 +588,7 @@ func (repo *repo) MailLog(ctx context.Context, campaignID string) ([]web.MailLog
 			sentAt int64
 		)
 
-		if err := rows.Scan(&e.Email, &e.Status, &e.Error, &sentAt); err != nil {
+		if err := rows.Scan(&e.Email, &e.Status, &e.Error, &e.FromEmail, &sentAt); err != nil {
 			return nil, err
 		}
 
@@ -552,16 +600,97 @@ func (repo *repo) MailLog(ctx context.Context, campaignID string) ([]web.MailLog
 }
 
 func (repo *repo) RecordMail(ctx context.Context, campaignID, email, status, errMsg string) error {
-	_, err := repo.db.ExecContext(ctx, `
-		INSERT INTO campaign_mail_log (campaign_id, email, status, error, sent_at)
-		VALUES (?, ?, ?, ?, ?)
+	return repo.RecordMailFrom(ctx, campaignID, email, status, errMsg, "")
+}
+
+// RecordMailFrom stores the latest result and which sender address produced it.
+func (repo *repo) RecordMailFrom(ctx context.Context, campaignID, email, status, errMsg, fromEmail string) error {
+	tx, err := repo.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+
+	defer func() {
+		_ = tx.Rollback()
+	}()
+
+	sentAt := time.Now().UTC().Unix()
+	fromEmail = strings.ToLower(strings.TrimSpace(fromEmail))
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO campaign_mail_log (campaign_id, email, status, error, sent_at, from_email)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(campaign_id, email) DO UPDATE SET
 			status = excluded.status,
 			error = excluded.error,
-			sent_at = excluded.sent_at
-	`, campaignID, strings.ToLower(email), status, errMsg, time.Now().UTC().Unix())
+			sent_at = excluded.sent_at,
+			from_email = excluded.from_email
+	`, campaignID, strings.ToLower(email), status, errMsg, sentAt, fromEmail)
+	if err != nil {
+		return err
+	}
+
+	if err := insertSenderLog(ctx, tx, campaignID, email, status, errMsg, fromEmail, sentAt); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+// RecordSenderResult appends one attempt for the sender counts.
+func (repo *repo) RecordSenderResult(ctx context.Context, campaignID, email, status, errMsg, fromEmail string) error {
+	return insertSenderLog(ctx, repo.db, campaignID, email, status, errMsg, strings.ToLower(strings.TrimSpace(fromEmail)), time.Now().UTC().Unix())
+}
+
+type sqlExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+func insertSenderLog(ctx context.Context, db sqlExecer, campaignID, email, status, errMsg, fromEmail string, sentAt int64) error {
+	if fromEmail == "" {
+		return nil
+	}
+
+	_, err := db.ExecContext(ctx, `
+		INSERT INTO campaign_sender_log (campaign_id, email, status, error, from_email, sent_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, campaignID, strings.ToLower(email), status, errMsg, fromEmail, sentAt)
 
 	return err
+}
+
+// SenderLog returns every recorded attempt, newest first.
+func (repo *repo) SenderLog(ctx context.Context, campaignID string) ([]web.MailLogEntry, error) {
+	rows, err := repo.db.QueryContext(ctx, `
+		SELECT email, status, error, from_email, sent_at FROM campaign_sender_log
+		WHERE campaign_id = ?
+		ORDER BY sent_at DESC, rowid DESC
+	`, campaignID)
+	if err != nil {
+		return nil, err
+	}
+
+	defer func() {
+		_ = rows.Close()
+	}()
+
+	var out []web.MailLogEntry
+
+	for rows.Next() {
+		var (
+			e      web.MailLogEntry
+			sentAt int64
+		)
+
+		if err := rows.Scan(&e.Email, &e.Status, &e.Error, &e.FromEmail, &sentAt); err != nil {
+			return nil, err
+		}
+
+		e.SentAt = time.Unix(sentAt, 0).UTC()
+		out = append(out, e)
+	}
+
+	return out, rows.Err()
 }
 
 // RequeueFailed deletes the failed send rows of a campaign. With no row left,

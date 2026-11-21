@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/gosom/scrapemate"
 )
 
 // searchCenterMetaKey holds the map center Google settled on for a search.
@@ -59,13 +60,51 @@ func placeCoords(href string) (latLon, bool) {
 }
 
 // viewportCenter extracts the map center from a Google Maps URL.
+// A 0,0 point is the unset world view, not a place someone searched.
 func viewportCenter(u string) (latLon, bool) {
 	m := viewportRe.FindStringSubmatch(u)
 	if m == nil {
 		return latLon{}, false
 	}
 
-	return parseLatLon(m[1], m[2])
+	p, ok := parseLatLon(m[1], m[2])
+	if !ok || (p.Lat == 0 && p.Lon == 0) {
+		return latLon{}, false
+	}
+
+	return p, true
+}
+
+// mapHintCenter is the center the maps page reported. It follows the proxy
+// IP often enough that it cannot be trusted on its own.
+func mapHintCenter(resp *scrapemate.Response) (latLon, bool) {
+	if resp == nil || resp.Meta == nil {
+		return latLon{}, false
+	}
+
+	if u, _ := resp.Meta[searchURLMetaKey].(string); u != "" {
+		if c, ok := viewportCenter(u); ok {
+			return c, true
+		}
+	}
+
+	c, ok := resp.Meta[searchCenterMetaKey].(latLon)
+	if !ok || (c.Lat == 0 && c.Lon == 0) {
+		return latLon{}, false
+	}
+
+	return c, true
+}
+
+// anyWithin reports whether any point lies inside maxMeters of center.
+func anyWithin(points []latLon, center latLon, maxMeters float64) bool {
+	for _, p := range points {
+		if distanceMeters(center, p) <= maxMeters {
+			return true
+		}
+	}
+
+	return false
 }
 
 // parseGeoCoordinates parses "lat,lon". A 0,0 point counts as unset.

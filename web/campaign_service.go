@@ -9,6 +9,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"strings"
+	"sync"
 	"time"
 	"uuid"
 )
@@ -263,6 +264,30 @@ func (s *Service) SaveCampaignMail(ctx context.Context, id string, cfg *MailConf
 	return nil
 }
 
+// SaveCampaignMessage stores the subject and body. Each sender keeps its own
+// address, name, server and password.
+func (s *Service) SaveCampaignMessage(ctx context.Context, id, subject, body string, format MailFormat) error {
+	store, err := s.campaignStore()
+	if err != nil {
+		return err
+	}
+
+	existing, ok, err := store.GetMail(ctx, id)
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		existing = MailConfig{Port: defaultSMTPPort, Encryption: MailStartTLS}
+	}
+
+	existing.Subject = subject
+	existing.Body = body
+	existing.Format = format
+
+	return s.SaveCampaignMail(ctx, id, &existing)
+}
+
 // CampaignMailForForm returns settings safe to render. The password is cleared.
 func (s *Service) CampaignMailForForm(ctx context.Context, id string) (MailConfig, bool, error) {
 	store, err := s.campaignStore()
@@ -483,6 +508,8 @@ type DispatchOptions struct {
 	OnlyFailed bool
 	// Quiet records nothing in the history when there is nothing to send.
 	Quiet bool
+	// AtOnce is how many emails leave together. Zero uses the saved number, or one.
+	AtOnce int
 }
 
 // StartDispatch sends the campaign to every address not sent yet. With resend,
@@ -634,9 +661,18 @@ func (s *Service) startDispatch(ctx context.Context, campaignID string, opts Dis
 		send = SendSMTP
 	}
 
+	atOnce := opts.AtOnce
+	if atOnce < 1 {
+		atOnce = 1
+
+		if saved, savedErr := s.GetAutoDispatch(ctx, campaignID); savedErr == nil && saved.AtOnce > 0 {
+			atOnce = saved.AtOnce
+		}
+	}
+
 	started = true
 
-	go s.runDispatch(campaignID, dispatchID, service, &cfg, msgs, skipped, missing, renderFailed, send) //nolint:gosec // G118: dispatch continues after the HTTP handler returns.
+	go s.runDispatch(campaignID, dispatchID, service, &cfg, msgs, skipped, missing, renderFailed, send, atOnce) //nolint:gosec // G118: dispatch continues after the HTTP handler returns.
 
 	return DispatchResult{Started: true, Detail: "Dispatch started."}, nil
 }
@@ -820,7 +856,75 @@ func (s *Service) unlockDispatch(id string) {
 	delete(s.dispatching, id)
 }
 
-func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailConfig, msgs []renderedMail, skipped, missing, renderFailed int, send MailSender) {
+// dispatchProgress is the shared tally of one run. The queue cursor advances
+// under mu before anyone sends, so two emails never take the same address.
+type dispatchProgress struct {
+	mu                         sync.Mutex
+	next                       int
+	sent, failed, unsubscribed int
+	firstErr                   string
+	halt                       error
+	deadSenders                map[string]struct{}
+}
+
+func (p *dispatchProgress) snapshot() (sent, failed, unsubscribed int, firstErr string, halt error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	return p.sent, p.failed, p.unsubscribed, p.firstErr, p.halt
+}
+
+// claim reserves the next n messages. n is already capped at the messages left.
+func (p *dispatchProgress) claim(n, total int) (start, end int, ok bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.halt != nil || p.next >= total || n < 1 {
+		return 0, 0, false
+	}
+
+	start = p.next
+	end = start + n
+
+	if end > total {
+		end = total
+	}
+
+	p.next = end
+
+	return start, end, true
+}
+
+func (p *dispatchProgress) senderDead(cfg MailConfig) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	_, ok := p.deadSenders[senderKey(cfg)]
+
+	return ok
+}
+
+func (p *dispatchProgress) killSender(cfg MailConfig) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.deadSenders == nil {
+		p.deadSenders = map[string]struct{}{}
+	}
+
+	p.deadSenders[senderKey(cfg)] = struct{}{}
+}
+
+func (p *dispatchProgress) setHalt(err error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if p.halt == nil {
+		p.halt = err
+	}
+}
+
+func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailConfig, msgs []renderedMail, skipped, missing, renderFailed int, send MailSender, atOnce int) {
 	defer s.unlockDispatch(campaignID)
 
 	ctl := s.openDispatchControl(campaignID)
@@ -833,71 +937,48 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		return
 	}
 
-	sent := 0
-	failed := renderFailed
-	unsubscribed := 0
-	firstErr := ""
+	if atOnce < 1 {
+		atOnce = 1
+	}
 
-	var halt error
+	if len(msgs) > 0 && atOnce > len(msgs) {
+		atOnce = len(msgs)
+	}
 
-	for i := range msgs {
-		msg := &msgs[i]
+	prog := &dispatchProgress{failed: renderFailed}
 
+	for {
+		sent, failed, unsubscribed, _, halt := prog.snapshot()
+		if halt != nil || prog.next >= len(msgs) {
+			break
+		}
+
+		// Pause and SMTP reload happen before the wave, so a wave shares one cfg.
 		s.dispatchCheckpoint(ctx, store, ctl, campaignID, dispatchID, cfg, sent, failed, skipped+unsubscribed)
 
-		sendErr := s.deliver(ctx, cfg, service, &OutgoingMail{To: msg.To, Subject: msg.Subject, Body: msg.Body}, send)
-
-		var optedOut ErrUnsubscribed
-
-		if errors.As(sendErr, &optedOut) {
-			// Not sent and not marked sent. The status keeps it out of later runs.
-			unsubscribed++
-
-			s.recordMail(ctx, store, campaignID, msg.To, MailStatusUnsubscribed, optedOut.Error())
-
-			continue
-		}
-
-		if suspendsSend(sendErr) {
-			// Nothing is recorded, so this address and the rest stay queued for the next run.
-			// The next lookups would most likely fail too, so the run stops here.
-			halt = sendErr
-			log.Printf("dispatch %s stopped: %v", dispatchID, sendErr)
-
+		start, end, ok := prog.claim(atOnce, len(msgs))
+		if !ok {
 			break
 		}
 
-		status := MailStatusSent
-		errMsg := ""
+		sentBefore, failedBefore, _, _, _ := prog.snapshot()
 
-		if isProviderBlock(sendErr) {
-			// The account is blocked, not this address. Leave it queued and stop
-			// so the rest of the list is not recorded as failed.
-			halt = fmt.Errorf("%w: %s", errProviderBlock, sendErr.Error())
-			log.Printf("dispatch %s stopped: %v", dispatchID, halt)
+		wave := msgs[start:end]
+		extras := s.smtpAccounts(ctx, campaignID)
 
+		s.sendWave(ctx, store, prog, service, campaignID, dispatchID, wave, *cfg, extras, start, send)
+
+		sent, failed, unsubscribed, _, halt = prog.snapshot()
+		if halt != nil || end >= len(msgs) {
 			break
 		}
 
-		if sendErr != nil {
-			failed++
-			status = MailStatusFailed
-			errMsg = sendErr.Error()
-
-			if firstErr == "" {
-				firstErr = msg.To + ": " + errMsg
-			}
-		} else {
-			sent++
-		}
-
-		s.recordMail(ctx, store, campaignID, msg.To, status, errMsg)
-
-		if i == len(msgs)-1 {
+		// An address that only opted out is not a send, so the run does not wait.
+		if sent == sentBefore && failed == failedBefore {
 			continue
 		}
 
-		wait, detail := s.nextPause(i, sent, failed, skipped+unsubscribed)
+		wait, detail := s.nextPause(sent, failed, skipped+unsubscribed, end-start, end/mailBatchSize > start/mailBatchSize)
 		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped+unsubscribed, detail); err != nil {
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
@@ -906,6 +987,8 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		s.paceSleep(ctx, wait)
 		ctl.setNextSend(time.Time{})
 	}
+
+	sent, failed, unsubscribed, firstErr, halt := prog.snapshot()
 
 	status := DispatchOK
 	if halt != nil || (sent == 0 && failed > 0) {
@@ -943,8 +1026,148 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 	}
 }
 
+// sendWave delivers wave. A single message stays on this goroutine, so one at a
+// time keeps today's order. A larger wave leaves together. The messages were
+// already claimed, so two sends cannot take the same address.
+func (s *Service) sendWave(ctx context.Context, store CampaignStore, prog *dispatchProgress, service, campaignID, dispatchID string, wave []renderedMail, primary MailConfig, extras []SMTPAccount, start int, send MailSender) {
+	// A login rejection is the sender's fault. Try the next live sender for
+	// that same address, and leave the rejected sender out for the rest of the run.
+	deliver := func(offset int) {
+		index := start + offset
+		account := mailAccountAt(primary, extras, index)
+		tries := 1 + len(extras)
+
+		for try := 0; try < tries; try++ {
+			if prog.senderDead(account) {
+				next, ok := nextLiveAccount(primary, extras, index+1, prog.senderDead)
+				if !ok {
+					prog.setHalt(errSenderLogin)
+
+					return
+				}
+
+				index++
+				account = next
+
+				continue
+			}
+
+			sendErr := s.deliver(ctx, &account, service, &OutgoingMail{To: wave[offset].To, Subject: wave[offset].Subject, Body: wave[offset].Body}, send)
+			if isSenderLoginFailure(sendErr) {
+				if permanentSenderLoginFailure(sendErr) {
+					prog.killSender(account)
+				}
+
+				s.recordSenderResult(ctx, store, campaignID, wave[offset].To, MailStatusFailed, sendErr.Error(), account.FromEmail)
+
+				next, ok := nextLiveAccount(primary, extras, index+1, prog.senderDead)
+				if !ok {
+					prog.setHalt(fmt.Errorf("%w: %s", errSenderLogin, sendErr.Error()))
+
+					return
+				}
+
+				index++
+				account = next
+
+				continue
+			}
+
+			s.noteDelivery(ctx, store, prog, campaignID, dispatchID, &wave[offset], account.FromEmail, sendErr)
+
+			return
+		}
+
+		prog.setHalt(errSenderLogin)
+	}
+
+	if len(wave) < 2 {
+		if len(wave) == 1 {
+			deliver(0)
+		}
+
+		return
+	}
+
+	var wg sync.WaitGroup
+
+	wg.Add(len(wave))
+
+	for i := range wave {
+		go func(offset int) {
+			defer wg.Done()
+
+			deliver(offset)
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+// noteDelivery records one result. A provider block or a lookup failure stops
+// the run without recording that address. recordMail stays outside the lock.
+func (s *Service) noteDelivery(ctx context.Context, store CampaignStore, prog *dispatchProgress, campaignID, dispatchID string, msg *renderedMail, fromEmail string, sendErr error) {
+	var optedOut ErrUnsubscribed
+
+	if errors.As(sendErr, &optedOut) {
+		prog.mu.Lock()
+		prog.unsubscribed++
+		prog.mu.Unlock()
+
+		s.recordMail(ctx, store, campaignID, msg.To, MailStatusUnsubscribed, optedOut.Error(), fromEmail)
+
+		return
+	}
+
+	if suspendsSend(sendErr) || isProviderBlock(sendErr) {
+		halt := sendErr
+		if isProviderBlock(sendErr) {
+			halt = fmt.Errorf("%w: %s", errProviderBlock, sendErr.Error())
+		}
+
+		prog.mu.Lock()
+		first := prog.halt == nil
+
+		if first {
+			prog.halt = halt
+		}
+
+		prog.mu.Unlock()
+
+		if first {
+			log.Printf("dispatch %s stopped: %v", dispatchID, halt)
+		}
+
+		return
+	}
+
+	status := MailStatusSent
+	errMsg := ""
+
+	prog.mu.Lock()
+
+	if sendErr != nil {
+		prog.failed++
+		status = MailStatusFailed
+		errMsg = sendErr.Error()
+
+		if prog.firstErr == "" {
+			prog.firstErr = msg.To + ": " + errMsg
+		}
+	} else {
+		prog.sent++
+	}
+
+	prog.mu.Unlock()
+
+	s.recordMail(ctx, store, campaignID, msg.To, status, errMsg, fromEmail)
+}
+
 // errProviderBlock stops a run when the SMTP account itself is refused.
 var errProviderBlock = errors.New("email provider blocked this account for unusual sending activity")
+
+// errSenderLogin stops a run only when every registered sender rejects the login.
+var errSenderLogin = errors.New("the SMTP server rejected the login")
 
 // suspendsSend reports errors that stop a send without trying the provider.
 func suspendsSend(err error) bool {
@@ -952,6 +1175,36 @@ func suspendsSend(err error) bool {
 }
 
 // isProviderBlock reports an SMTP refusal of the sending account, such as Zoho 5.4.6.
+// isSenderLoginFailure reports a refusal of the mailbox password. The address
+// itself was not rejected, so another sender can take it.
+func isSenderLoginFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	text := strings.ToLower(err.Error())
+
+	return strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "authentication failure") ||
+		strings.Contains(text, "5.7.8") ||
+		strings.Contains(text, "535 ") ||
+		strings.Contains(text, "4.7.0")
+}
+
+// permanentSenderLoginFailure is a password refusal. A temporary authentication
+// failure keeps the sender in the rotation for a later message.
+func permanentSenderLoginFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	text := strings.ToLower(err.Error())
+
+	return strings.Contains(text, "authentication failed") ||
+		strings.Contains(text, "5.7.8") ||
+		strings.Contains(text, "535 ")
+}
+
 func isProviderBlock(err error) bool {
 	if err == nil {
 		return false
@@ -993,19 +1246,41 @@ func (s *Service) providerBlockCooling(ctx context.Context, campaignID string) b
 	return time.Since(last.FinishedAt) < providerBlockCooldown
 }
 
-func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignID, email, status, errMsg string) {
-	if err := store.RecordMail(ctx, campaignID, strings.ToLower(email), status, errMsg); err != nil {
+func (s *Service) recordMail(ctx context.Context, store CampaignStore, campaignID, email, status, errMsg, fromEmail string) {
+	err := store.RecordMailFrom(ctx, campaignID, strings.ToLower(email), status, errMsg, fromEmail)
+	if err != nil {
 		log.Printf("record mail result for campaign %s: %v", campaignID, err) //nolint:gosec // G706: campaignID is a parsed UUID. The error is the local write failure.
 	}
 }
 
-// nextPause is the wait after message index: a random pause between messages,
-// or a longer random gap after every mailBatchSize messages.
-func (s *Service) nextPause(index, sent, failed, skipped int) (wait time.Duration, detail string) {
+func (s *Service) recordSenderResult(ctx context.Context, store CampaignStore, campaignID, email, status, errMsg, fromEmail string) {
+	err := store.RecordSenderResult(ctx, campaignID, strings.ToLower(email), status, errMsg, fromEmail)
+	if err != nil {
+		log.Printf("record sender result for campaign %s: %v", campaignID, err) //nolint:gosec // G706: campaignID is a parsed UUID. The error is the local write failure.
+	}
+}
+
+// SenderLog is every recorded attempt for the campaign, newest first.
+func (s *Service) SenderLog(ctx context.Context, campaignID string) ([]MailLogEntry, error) {
+	store, err := s.campaignStore()
+	if err != nil {
+		return nil, err
+	}
+
+	return store.SenderLog(ctx, campaignID)
+}
+
+// nextPause is the shared wait after a wave. together is how many left at once.
+// batchGap is set when the wave crossed a multiple of mailBatchSize.
+func (s *Service) nextPause(sent, failed, skipped, together int, batchGap bool) (wait time.Duration, detail string) {
 	why := "before the next message"
 	wait = s.paceWait(mailMinWait, mailMaxWait)
 
-	if (index+1)%mailBatchSize == 0 {
+	if together > 1 {
+		why = "before the next emails"
+	}
+
+	if batchGap {
 		why = "before the next batch"
 		wait = s.paceWait(mailBatchMinGap, mailBatchMaxGap)
 	}

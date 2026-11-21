@@ -4,6 +4,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -69,10 +70,75 @@ func TestCampaignPagesHidePassword(t *testing.T) {
 		t.Fatalf("page missing mail form: %s", body)
 	}
 
+	if strings.Contains(body, `name="from_email"`) || strings.Contains(body, `name="from_name"`) || strings.Contains(body, "Empty keeps the name") {
+		t.Fatal("message form still has a shared sender")
+	}
+
+	if !strings.Contains(body, `name="sender_from_email"`) || !strings.Contains(body, `data-sender-check="primary"`) || !strings.Contains(body, `name="test_sender"`) {
+		t.Fatal("page missing per-sender edit and connection test")
+	}
+
 	for _, svc := range DefaultServices {
 		if !strings.Contains(body, `<option value="`+svc.Name+`"`) {
 			t.Fatalf("service select has no %s option", svc.Name)
 		}
+	}
+}
+
+func TestSaveCampaignMessageKeepsEachSender(t *testing.T) {
+	store := newMemStore()
+	id := "11111111-1111-1111-1111-111111111111"
+	store.campaigns[id] = Campaign{ID: id, Name: "Spring", CreatedAt: time.Unix(10, 0).UTC()}
+	store.mail[id] = MailConfig{
+		Host: "smtp.zoho.com", Port: 465, Username: "contact@example.com",
+		Password: "keep-me", Encryption: MailSSL,
+		FromEmail: "contact@example.com", FromName: "SplitQuota",
+		Subject: "Old", Body: "Old body", Format: MailFormatPlain,
+	}
+	svc := &Service{repo: store}
+	ctx := context.Background()
+
+	if err := svc.SaveCampaignMessage(ctx, id, "New subject", "New body", MailFormatHTML); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := store.GetMail(ctx, id)
+	if err != nil || !ok || got.FromEmail != "contact@example.com" || got.FromName != "SplitQuota" || got.Password != "keep-me" || got.Host != "smtp.zoho.com" || got.Subject != "New subject" || got.Body != "New body" || got.Format != MailFormatHTML {
+		t.Fatalf("message save changed the sender: %+v %v", got, err)
+	}
+
+	extra := &SMTPAccount{
+		ID: "extra-1", Host: "smtp.other.test", Port: 465, Username: "two@example.com",
+		Password: "other-secret", Encryption: MailSSL, FromEmail: "two@example.com",
+	}
+	if err := store.InsertSMTPAccount(ctx, id, extra); err != nil {
+		t.Fatal(err)
+	}
+
+	updated := SMTPAccount{
+		ID: "extra-1", Host: "smtp.other.test", Port: 465, Username: "two@example.com",
+		Encryption: MailSSL, FromEmail: "two@example.com", FromName: "Only Two",
+	}
+	if err := svc.UpdateSMTPAccount(ctx, id, &updated); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := store.ListSMTPAccounts(ctx, id)
+	if err != nil || len(list) != 1 || list[0].Password != "other-secret" || list[0].FromName != "Only Two" {
+		t.Fatalf("extra %+v %v", list, err)
+	}
+
+	primary := SMTPAccount{
+		Host: "smtp.zoho.com", Port: 465, Username: "contact@example.com",
+		Encryption: MailSSL, FromEmail: "contact@example.com", FromName: "New Name",
+	}
+	if err := svc.SavePrimarySender(ctx, id, &primary); err != nil {
+		t.Fatal(err)
+	}
+
+	got, _, err = store.GetMail(ctx, id)
+	if err != nil || got.Password != "keep-me" || got.FromName != "New Name" || got.Subject != "New subject" {
+		t.Fatalf("primary save %+v %v", got, err)
 	}
 }
 
@@ -179,6 +245,9 @@ type memStore struct {
 	reasons    map[string]map[string]string
 	services   map[string]MailService
 	dispatches []Dispatch
+	smtp       map[string][]SMTPAccount
+	froms      map[string]map[string]string
+	events     map[string][]MailLogEntry
 }
 
 func newMemStore() *memStore {
@@ -411,6 +480,59 @@ func (m *memStore) CampaignsForJobs(_ context.Context, jobIDs []string) (map[str
 	return out, nil
 }
 
+func (m *memStore) ListSMTPAccounts(_ context.Context, campaignID string) ([]SMTPAccount, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	return append([]SMTPAccount(nil), m.smtp[campaignID]...), nil
+}
+
+func (m *memStore) InsertSMTPAccount(_ context.Context, campaignID string, a *SMTPAccount) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.smtp == nil {
+		m.smtp = map[string][]SMTPAccount{}
+	}
+
+	copied := *a
+	m.smtp[campaignID] = append(m.smtp[campaignID], copied)
+
+	return nil
+}
+
+func (m *memStore) UpdateSMTPAccount(_ context.Context, campaignID string, a *SMTPAccount) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	list := m.smtp[campaignID]
+	for i := range list {
+		if list[i].ID == a.ID {
+			m.smtp[campaignID][i] = *a
+
+			return nil
+		}
+	}
+
+	return errors.New("SMTP server not found")
+}
+
+func (m *memStore) DeleteSMTPAccount(_ context.Context, campaignID, accountID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	list := m.smtp[campaignID]
+	for i := range list {
+		if list[i].ID == accountID {
+			m.smtp[campaignID] = append(list[:i], list[i+1:]...)
+
+			return nil
+		}
+	}
+
+	return errors.New("SMTP server not found")
+}
+
 func (m *memStore) GetMail(_ context.Context, campaignID string) (MailConfig, bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -449,7 +571,11 @@ func (m *memStore) SentEmails(_ context.Context, campaignID string) (map[string]
 	return out, nil
 }
 
-func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, reason string) error {
+func (m *memStore) RecordMail(ctx context.Context, campaignID, email, status, reason string) error {
+	return m.RecordMailFrom(ctx, campaignID, email, status, reason, "")
+}
+
+func (m *memStore) RecordMailFrom(_ context.Context, campaignID, email, status, reason, fromEmail string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -458,10 +584,62 @@ func (m *memStore) RecordMail(_ context.Context, campaignID, email, status, reas
 		m.reasons[campaignID] = map[string]string{}
 	}
 
+	if m.froms == nil {
+		m.froms = map[string]map[string]string{}
+	}
+
+	if m.froms[campaignID] == nil {
+		m.froms[campaignID] = map[string]string{}
+	}
+
 	m.sent[campaignID][email] = status
 	m.reasons[campaignID][email] = reason
+	m.froms[campaignID][email] = fromEmail
+	m.appendSenderEvent(campaignID, email, status, reason, fromEmail)
 
 	return nil
+}
+
+func (m *memStore) RecordSenderResult(_ context.Context, campaignID, email, status, reason, fromEmail string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	m.appendSenderEvent(campaignID, email, status, reason, fromEmail)
+
+	return nil
+}
+
+func (m *memStore) appendSenderEvent(campaignID, email, status, reason, fromEmail string) {
+	fromEmail = strings.ToLower(strings.TrimSpace(fromEmail))
+	if fromEmail == "" {
+		return
+	}
+
+	if m.events == nil {
+		m.events = map[string][]MailLogEntry{}
+	}
+
+	m.events[campaignID] = append(m.events[campaignID], MailLogEntry{
+		Email:     strings.ToLower(email),
+		Status:    status,
+		Error:     reason,
+		FromEmail: fromEmail,
+		SentAt:    time.Now().UTC(),
+	})
+}
+
+func (m *memStore) SenderLog(_ context.Context, campaignID string) ([]MailLogEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	src := m.events[campaignID]
+	out := make([]MailLogEntry, len(src))
+
+	for i := range src {
+		out[len(src)-1-i] = src[i]
+	}
+
+	return out, nil
 }
 
 func (m *memStore) RequeueFailed(_ context.Context, campaignID string) (int, error) {
@@ -487,7 +665,7 @@ func (m *memStore) MailLog(_ context.Context, campaignID string) ([]MailLogEntry
 
 	out := make([]MailLogEntry, 0, len(m.sent[campaignID]))
 	for email, status := range m.sent[campaignID] {
-		out = append(out, MailLogEntry{Email: email, Status: status})
+		out = append(out, MailLogEntry{Email: email, Status: status, FromEmail: m.froms[campaignID][email]})
 	}
 
 	return out, nil

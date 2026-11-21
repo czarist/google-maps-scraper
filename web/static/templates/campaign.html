@@ -15,7 +15,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.6/htmx.min.js"></script>
 </head>
 <body hx-boost="true">
-    <a class="skip-link" href="#smtp_host">{{t "Skip to email settings"}}</a>
+    <a class="skip-link" href="#subject">{{t "Skip to email settings"}}</a>
 
     <header class="topbar">
         <div class="brand">
@@ -56,10 +56,10 @@
 
             {{if .Error}}<div class="notice notice-error" role="alert">{{t .Error}}</div>{{end}}
             {{if .Notice}}<div class="notice notice-success" role="status">{{t .Notice}}</div>{{end}}
-            <div id="live-running">{{if .Running}}<div class="notice notice-success" role="status">{{if .RunningDetail}}{{t .RunningDetail}}{{else}}{{t "Sending now."}}{{end}}{{if .NextSendMS}} <span class="countdown" data-left-ms="{{.NextSendMS}}"><i class="fas fa-hourglass-half" aria-hidden="true"></i> {{if .NextIsBatch}}{{t "Next batch in"}}{{else}}{{t "Next email in"}}{{end}} <strong data-countdown></strong></span>{{end}}</div>{{end}}</div>
+            <div id="live-running">{{if .Running}}<div class="notice notice-success" role="status">{{if .RunningDetail}}{{t .RunningDetail}}{{else}}{{t "Sending now."}}{{end}}{{if .NextSendMS}} <span class="countdown" data-left-ms="{{.NextSendMS}}"><i class="fas fa-hourglass-half" aria-hidden="true"></i> {{if .NextIsBatch}}{{t "Next batch in"}}{{else if .NextAreEmails}}{{t "Next emails in"}}{{else}}{{t "Next email in"}}{{end}} <strong data-countdown></strong></span>{{end}}</div>{{end}}</div>
             <!-- Refreshes the live regions of this page in place; faster while emails are being sent. -->
             <div id="live-poller" hx-get="/campaigns/{{.Campaign.ID}}{{.PageQuery}}" hx-trigger="every {{if .Running}}3s{{else}}15s{{end}}"
-                 hx-select-oob="#live-running,#live-stats,#live-jobs,#live-dispatch-info,#live-dispatch-button,#live-dispatch-controls,#live-history,#live-sends,#live-poller"
+                 hx-select-oob="#live-running,#live-stats,#live-jobs,#live-dispatch-info,#live-dispatch-button,#live-dispatch-controls,#live-history,#live-sends,#live-senders,#live-poller"
                  hx-swap="none"></div>
 
             <div class="stats-grid" id="live-stats" aria-label="{{t "Campaign numbers"}}">
@@ -165,55 +165,153 @@
                 <h2 id="mail-title"><i class="fas fa-envelope" aria-hidden="true"></i> {{t "Email dispatch"}}</h2>
                 <p class="lede lede-wide">{{t "These settings are used only for %s." .Campaign.Name}}</p>
             </div>
-            <form id="mail-form" class="mail-form" method="post" action="/campaigns/{{.Campaign.ID}}/mail" data-id="{{.Campaign.ID}}">
-                <fieldset class="form-card">
-                    <legend><i class="fas fa-server" aria-hidden="true"></i> {{t "SMTP server"}}</legend>
-                    <div class="form-grid">
-                        <div class="field span-2">
-                            <label for="smtp_host"><i class="fas fa-server" aria-hidden="true"></i> {{t "Host"}}</label>
-                            <input type="text" id="smtp_host" name="smtp_host" value="{{.Mail.Host}}" autocomplete="off" placeholder="mailpit">
-                            <p class="hint">{{t "Dev inbox: host"}} <code>mailpit</code>, {{t "port"}} <code>1025</code>, {{t "no encryption. Open"}} <a href="http://127.0.0.1:8026" hx-boost="false">Mailpit</a>.</p>
+            <section id="live-senders" class="sender-board" aria-labelledby="senders-title">
+                <h3 id="senders-title"><i class="fas fa-at" aria-hidden="true"></i> {{t "Registered senders"}}</h3>
+                <p class="hint">{{t "The message is the same for every sender. The address and the name belong to that sender."}}</p>
+                <p class="hint">{{t "Counts start with the next sends. Older sends are not split by sender."}}</p>
+                <p class="hint">{{t "A sender that rejects the login is skipped for the rest of the run. The address is sent by the next sender."}}</p>
+                <ul class="sender-list">
+                    {{range .Senders}}
+                    <li>
+                        <div class="smtp-who">
+                            <strong>{{if .FromEmail}}{{.FromEmail}}{{else}}{{t "Not filled in yet"}}{{end}}</strong>
+                            <p class="hint">{{if .FromName}}{{.FromName}} · {{end}}{{if .Host}}{{.Host}}:{{.Port}}{{else}}{{t "The server from the Email tab"}}{{end}}{{if eq .DialogID "primary"}} · {{t "First"}}{{end}} · {{if eq .Encryption "ssl"}}SSL{{else if eq .Encryption "starttls"}}STARTTLS{{else}}{{t "No encryption"}}{{end}}</p>
                         </div>
-                        <div class="field">
-                            <label for="smtp_port"><i class="fas fa-hashtag" aria-hidden="true"></i> {{t "Port"}}</label>
-                            <input type="number" id="smtp_port" name="smtp_port" min="1" max="65535" value="{{.Mail.Port}}" required>
-                        </div>
-                        <div class="field">
-                            <label for="encryption"><i class="fas fa-lock" aria-hidden="true"></i> {{t "Encryption"}}</label>
-                            <select id="encryption" name="encryption">
-                                <option value="starttls" {{if .Mail.EncryptionIs "starttls"}}selected{{end}}>STARTTLS ({{t "usually"}} 587)</option>
-                                <option value="ssl" {{if .Mail.EncryptionIs "ssl"}}selected{{end}}>SSL ({{t "usually"}} 465)</option>
-                                <option value="none" {{if .Mail.EncryptionIs "none"}}selected{{end}}>{{t "No encryption"}}</option>
-                            </select>
-                        </div>
-                        <div class="field span-2">
-                            <label for="smtp_username"><i class="fas fa-user" aria-hidden="true"></i> {{t "Username"}}</label>
-                            <input type="text" id="smtp_username" name="smtp_username" value="{{.Mail.Username}}" autocomplete="off">
-                            <p class="hint">{{t "Leave empty if the server does not require a login."}}</p>
-                        </div>
-                        <div class="field span-2">
-                            <label for="smtp_password"><i class="fas fa-key" aria-hidden="true"></i> {{t "Password"}}</label>
-                            <input type="password" id="smtp_password" name="smtp_password" value="" autocomplete="new-password">
-                            {{if .PasswordSet}}
-                            <p class="hint">{{t "A password is saved. Leave this blank to keep it."}}</p>
-                            {{else}}
-                            <p class="hint">{{t "Stored for this campaign only. Required before sending."}}</p>
+                        <p class="sender-counts">
+                            <span><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "%d sent" .Sent}}</span>
+                            <span class="sender-failed"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "%d with errors" .Failed}}</span>
+                        </p>
+                        <div class="sender-actions">
+                            <button type="button" class="btn-quiet" data-sender-edit="sender-edit-{{.DialogID}}" data-sender-title="{{if .FromName}}{{.FromName}} · {{end}}{{.FromEmail}}"><i class="fas fa-pen" aria-hidden="true"></i> {{t "Edit sender"}}</button>
+                            <button type="button" class="btn-quiet" data-sender-check="{{.DialogID}}" data-sender-check-url="/campaigns/{{$.Campaign.ID}}/senders/check"><i class="fas fa-plug" aria-hidden="true"></i> {{t "Test connection"}}</button>
+                            <button type="button" class="btn-quiet" data-sender-log="sender-log-{{.DialogID}}" data-sender-title="{{if .FromName}}{{.FromName}} · {{end}}{{.FromEmail}}"><i class="fas fa-list" aria-hidden="true"></i> {{t "View errors"}}</button>
+                            {{if ne .DialogID "primary"}}
+                            <form method="post" action="/campaigns/{{$.Campaign.ID}}/smtp/remove" hx-confirm="{{t "Remove this SMTP server?"}}">
+                                <input type="hidden" name="smtp_id" value="{{.DialogID}}">
+                                <button type="submit" class="btn-quiet"><i class="fas fa-trash" aria-hidden="true"></i> {{t "Remove"}}</button>
+                            </form>
                             {{end}}
                         </div>
+                        <template id="sender-log-{{.DialogID}}">
+                            {{if .Errors}}
+                            <ul class="sender-errors">
+                                {{range .Errors}}
+                                <li>
+                                    <div class="sender-error-head">
+                                        <strong>{{.Email}}</strong>
+                                        <span class="job-id">{{.SentLocal}}</span>
+                                    </div>
+                                    <p>{{.Error}}</p>
+                                </li>
+                                {{end}}
+                            </ul>
+                            {{if .ErrorMore}}<p class="hint">{{t "%d older errors are not listed." .ErrorMore}}</p>{{end}}
+                            {{else}}
+                            <p class="hint">{{t "No errors for this sender."}}</p>
+                            {{end}}
+                        </template>
+                        <template id="sender-edit-{{.DialogID}}">
+                            <form method="post" action="/campaigns/{{$.Campaign.ID}}/senders/save">
+                                <input type="hidden" name="smtp_id" value="{{.DialogID}}">
+                                <div class="form-grid">
+                                    <div class="field span-2">
+                                        <label for="edit-host-{{.DialogID}}"><i class="fas fa-server" aria-hidden="true"></i> {{t "Host"}}</label>
+                                        <input type="text" id="edit-host-{{.DialogID}}" name="sender_host" value="{{.Host}}" autocomplete="off" required>
+                                    </div>
+                                    <div class="field">
+                                        <label for="edit-port-{{.DialogID}}"><i class="fas fa-hashtag" aria-hidden="true"></i> {{t "Port"}}</label>
+                                        <input type="number" id="edit-port-{{.DialogID}}" name="sender_port" min="1" max="65535" value="{{.Port}}" required>
+                                    </div>
+                                    <div class="field">
+                                        <label for="edit-enc-{{.DialogID}}"><i class="fas fa-lock" aria-hidden="true"></i> {{t "Encryption"}}</label>
+                                        <select id="edit-enc-{{.DialogID}}" name="sender_encryption">
+                                            <option value="starttls" {{if eq .Encryption "starttls"}}selected{{end}}>STARTTLS ({{t "usually"}} 587)</option>
+                                            <option value="ssl" {{if eq .Encryption "ssl"}}selected{{end}}>SSL ({{t "usually"}} 465)</option>
+                                            <option value="none" {{if eq .Encryption "none"}}selected{{end}}>{{t "No encryption"}}</option>
+                                        </select>
+                                        <p class="hint">{{t "Port 465 speaks SSL as soon as it connects. STARTTLS on that port is saved as SSL."}}</p>
+                                    </div>
+                                    <div class="field span-2">
+                                        <label for="edit-user-{{.DialogID}}"><i class="fas fa-user" aria-hidden="true"></i> {{t "Username"}}</label>
+                                        <input type="text" id="edit-user-{{.DialogID}}" name="sender_username" value="{{.Username}}" autocomplete="off">
+                                    </div>
+                                    <div class="field span-2">
+                                        <label for="edit-pass-{{.DialogID}}"><i class="fas fa-key" aria-hidden="true"></i> {{t "Password"}}</label>
+                                        <input type="password" id="edit-pass-{{.DialogID}}" name="sender_password" value="" autocomplete="new-password">
+                                        {{if .PasswordSet}}<p class="hint">{{t "A password is saved. Leave this blank to keep it."}}</p>{{else}}<p class="hint">{{t "Stored for this campaign only. Required before sending."}}</p>{{end}}
+                                    </div>
+                                    <div class="field span-2">
+                                        <label for="edit-from-{{.DialogID}}"><i class="fas fa-at" aria-hidden="true"></i> {{t "From email"}}</label>
+                                        <input type="email" id="edit-from-{{.DialogID}}" name="sender_from_email" value="{{.FromEmail}}" autocomplete="off" required>
+                                    </div>
+                                    <div class="field span-2">
+                                        <label for="edit-name-{{.DialogID}}"><i class="fas fa-signature" aria-hidden="true"></i> {{t "From name"}}</label>
+                                        <input type="text" id="edit-name-{{.DialogID}}" name="sender_from_name" value="{{.FromName}}" autocomplete="off">
+                                        <p class="hint">{{t "This name is only for this sender."}}</p>
+                                    </div>
+                                </div>
+                                <div class="submit-row">
+                                    <button type="submit" class="btn-primary"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save sender"}}</button>
+                                </div>
+                            </form>
+                        </template>
+                    </li>
+                    {{else}}
+                    <li><p class="hint">{{t "Not filled in yet"}}</p></li>
+                    {{end}}
+                </ul>
+            </section>
+            <div id="sender-check-result" class="notice" hidden></div>
+            <section class="smtp-extra" id="add-sender" aria-labelledby="add-sender-title">
+                <h3 id="add-sender-title"><i class="fas fa-plus" aria-hidden="true"></i> {{t "Add sender"}}</h3>
+                <p class="hint">{{t "The message is the same for every sender. The address and the name belong to that sender."}}</p>
+                <form method="post" action="/campaigns/{{.Campaign.ID}}/senders/save" class="smtp-add">
+                    <div class="form-grid">
+                        <div class="field span-2">
+                            <label for="add-sender-host"><i class="fas fa-server" aria-hidden="true"></i> {{t "Host"}}</label>
+                            <input type="text" id="add-sender-host" name="sender_host" autocomplete="off" required>
+                        </div>
+                        <div class="field">
+                            <label for="add-sender-port"><i class="fas fa-hashtag" aria-hidden="true"></i> {{t "Port"}}</label>
+                            <input type="number" id="add-sender-port" name="sender_port" min="1" max="65535" value="587" required>
+                        </div>
+                        <div class="field">
+                            <label for="add-sender-enc"><i class="fas fa-lock" aria-hidden="true"></i> {{t "Encryption"}}</label>
+                            <select id="add-sender-enc" name="sender_encryption">
+                                <option value="starttls" selected>STARTTLS ({{t "usually"}} 587)</option>
+                                <option value="ssl">SSL ({{t "usually"}} 465)</option>
+                                <option value="none">{{t "No encryption"}}</option>
+                            </select>
+                            <p class="hint">{{t "Port 465 speaks SSL as soon as it connects. STARTTLS on that port is saved as SSL."}}</p>
+                        </div>
+                        <div class="field span-2">
+                            <label for="add-sender-user"><i class="fas fa-user" aria-hidden="true"></i> {{t "Username"}}</label>
+                            <input type="text" id="add-sender-user" name="sender_username" autocomplete="off">
+                        </div>
+                        <div class="field span-2">
+                            <label for="add-sender-pass"><i class="fas fa-key" aria-hidden="true"></i> {{t "Password"}}</label>
+                            <input type="password" id="add-sender-pass" name="sender_password" autocomplete="new-password" required>
+                            <p class="hint">{{t "Stored for this campaign only. Required before sending."}}</p>
+                        </div>
+                        <div class="field span-2">
+                            <label for="add-sender-from"><i class="fas fa-at" aria-hidden="true"></i> {{t "From email"}}</label>
+                            <input type="email" id="add-sender-from" name="sender_from_email" autocomplete="off" required>
+                        </div>
+                        <div class="field span-2">
+                            <label for="add-sender-name"><i class="fas fa-signature" aria-hidden="true"></i> {{t "From name"}}</label>
+                            <input type="text" id="add-sender-name" name="sender_from_name" autocomplete="off">
+                            <p class="hint">{{t "This name is only for this sender."}}</p>
+                        </div>
                     </div>
-                </fieldset>
-
+                    <div class="submit-row">
+                        <button type="submit" class="btn-primary"><i class="fas fa-plus" aria-hidden="true"></i> {{t "Add sender"}}</button>
+                    </div>
+                </form>
+            </section>
+            <form id="mail-form" class="mail-form" method="post" action="/campaigns/{{.Campaign.ID}}/mail" data-id="{{.Campaign.ID}}">
                 <fieldset class="form-card">
                     <legend><i class="fas fa-envelope-open-text" aria-hidden="true"></i> {{t "Message"}}</legend>
                     <div class="form-grid">
-                        <div class="field">
-                            <label for="from_email"><i class="fas fa-at" aria-hidden="true"></i> {{t "From email"}}</label>
-                            <input type="email" id="from_email" name="from_email" value="{{.Mail.FromEmail}}" autocomplete="off">
-                        </div>
-                        <div class="field">
-                            <label for="from_name"><i class="fas fa-signature" aria-hidden="true"></i> {{t "From name"}}</label>
-                            <input type="text" id="from_name" name="from_name" value="{{.Mail.FromName}}" autocomplete="off">
-                        </div>
                         <div class="field">
                             <label for="format"><i class="fas fa-code" aria-hidden="true"></i> {{t "Body format"}}</label>
                             <select id="format" name="format">
@@ -241,23 +339,56 @@
                     <legend><i class="fas fa-vial" aria-hidden="true"></i> {{t "Try it"}}</legend>
                     <div class="test-row">
                         <div class="field">
+                            <label for="test_sender"><i class="fas fa-at" aria-hidden="true"></i> {{t "Send the test from"}}</label>
+                            <select id="test_sender" name="test_sender">
+                                {{range .Senders}}
+                                <option value="{{.DialogID}}">{{if .FromEmail}}{{.FromEmail}}{{else}}{{.Host}}{{end}}{{if .FromName}} · {{.FromName}}{{end}}</option>
+                                {{end}}
+                            </select>
+                        </div>
+                        <div class="field">
                             <label for="test_to"><i class="fas fa-vial" aria-hidden="true"></i> {{t "Send a test to"}}</label>
                             <input type="email" id="test_to" name="test_to" autocomplete="off" placeholder="you@example.com">
                         </div>
                         <button type="button" class="btn-quiet" id="mail-test"><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send test"}}</button>
                         <button type="button" class="btn-quiet" id="mail-preview"><i class="fas fa-eye" aria-hidden="true"></i> {{t "Preview"}}</button>
-                        <button type="button" class="btn-quiet" id="mail-check"><i class="fas fa-plug" aria-hidden="true"></i> {{t "Test SMTP connection"}}</button>
                     </div>
-                    <p class="hint">{{t "The test and the preview use this form and do not save it."}}</p>
+                    <p class="hint">{{t "The preview uses this form and does not save it. The test uses the sender you pick and that sender's saved login."}}</p>
                 </fieldset>
 
                 <div id="mail-result" class="notice" hidden></div>
                 <div class="submit-row mail-save-row">
                     <button type="submit" class="btn-primary"><i class="fas fa-floppy-disk" aria-hidden="true"></i> {{t "Save email settings"}}</button>
-                    <p class="hint">{{t "Saving while emails are being sent (or paused) switches the running send to the new server, login, password and sender from the next email. Subject and body changes apply to the next send."}}</p>
+                    <p class="hint">{{t "Saving the message does not change the senders. Subject and body apply to the next send."}}</p>
                 </div>
-                <noscript><p class="hint">{{t "Upload, preview, and the connection test need JavaScript. You can still paste the message and save."}}</p></noscript>
+                <noscript><p class="hint">{{t "Upload and preview need JavaScript. You can still paste the message and save."}}</p></noscript>
             </form>
+
+            <dialog id="sender-log-dialog" class="modal" aria-labelledby="sender-log-title">
+                <section class="panel">
+                    <div class="modal-head">
+                        <div>
+                            <h2 id="sender-log-title"><i class="fas fa-triangle-exclamation" aria-hidden="true"></i> {{t "Error log"}}</h2>
+                            <p class="hint" data-sender-log-title></p>
+                        </div>
+                        <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+                    </div>
+                    <div data-sender-log-body></div>
+                </section>
+            </dialog>
+
+            <dialog id="sender-edit-dialog" class="modal" aria-labelledby="sender-edit-title">
+                <section class="panel">
+                    <div class="modal-head">
+                        <div>
+                            <h2 id="sender-edit-title"><i class="fas fa-pen" aria-hidden="true"></i> {{t "Edit sender"}}</h2>
+                            <p class="hint" data-sender-edit-title></p>
+                        </div>
+                        <button type="button" class="modal-close" data-close-dialog aria-label="{{t "Close"}}"><i class="fas fa-xmark" aria-hidden="true"></i></button>
+                    </div>
+                    <div data-sender-edit-body></div>
+                </section>
+            </dialog>
 
             <dialog id="preview-dialog" class="modal modal-wide" aria-labelledby="preview-title">
                 <section class="panel">
@@ -278,8 +409,26 @@
             <h2><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
-            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent, in batches of 20, with a random 20 to 75 second pause between messages and a random 1 to 3 minute pause between batches."}}</p>
+            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent. However many are set at once go out together, then wait 20 to 75 seconds, and 3 to 6 minutes after every 12."}}</p>
             </div>
+
+            <section class="smtp-extra" id="more-smtp" aria-labelledby="more-smtp-title">
+                <h3 id="more-smtp-title"><i class="fas fa-at" aria-hidden="true"></i> {{t "Send order"}}</h3>
+                <p class="hint">{{t "Each sender is edited on the Email tab. Each one has its own address and name, and they all send this message."}}</p>
+                <ol class="smtp-order">
+                    {{range .Senders}}
+                    <li>
+                        <div class="smtp-who">
+                            <strong>{{if .FromEmail}}{{.FromEmail}}{{else}}{{t "Not filled in yet"}}{{end}}</strong>
+                            <p class="hint">{{if .FromName}}{{.FromName}} · {{end}}{{if .Host}}{{.Host}}:{{.Port}}{{else}}{{t "The server from the Email tab"}}{{end}}{{if eq .DialogID "primary"}} · {{t "First"}}{{end}}</p>
+                        </div>
+                    </li>
+                    {{else}}
+                    <li><p class="hint">{{t "Not filled in yet"}}</p></li>
+                    {{end}}
+                </ol>
+            </section>
+
             <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch">
                 <label class="check" for="resend">
                     <input type="checkbox" id="resend" name="resend">
@@ -294,8 +443,13 @@
                     <p class="hint">{{t "Applies only when sending again. 0 sends again to everyone."}}</p>
                 </div>
                 <div class="submit-row">
+                    <label class="at-once" for="send_at_once">
+                        <input type="number" id="send_at_once" name="send_at_once" value="{{if gt .Auto.AtOnce 0}}{{.Auto.AtOnce}}{{else}}1{{end}}" min="1" step="1" inputmode="numeric">
+                        <span>{{t "at once"}}</span>
+                    </label>
                     <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Paused}}<i class="fas fa-pause" aria-hidden="true"></i> {{t "Paused"}}{{else if .Running}}<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> {{t "Sending"}}{{else}}<i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}{{end}}</button>
                 </div>
+                <p class="hint">{{t "They leave together. Each one takes the next address in the queue and the next SMTP server."}}</p>
             </form>
 
             <div id="live-dispatch-controls" class="submit-row dispatch-controls">
@@ -303,7 +457,7 @@
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/resume">
                     <button type="submit" class="btn-primary"><i class="fas fa-play" aria-hidden="true"></i> {{t "Resume sending"}}</button>
                 </form>
-                <p class="hint">{{t "Paused before the next email. Change the server, password or sender in the Email tab, save, then resume: the rest is sent with the new settings."}}</p>
+                <p class="hint">{{t "Paused before the next emails. Change the server, password or sender in the Email tab, save, then resume: the rest is sent with the new settings."}}</p>
                 {{else if .Running}}
                 <form method="post" action="/campaigns/{{.Campaign.ID}}/dispatch/pause">
                     <button type="submit" class="btn-quiet"><i class="fas fa-pause" aria-hidden="true"></i> {{t "Pause sending"}}</button>
@@ -321,7 +475,7 @@
                     <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
                     <span>
                         <i class="fas fa-robot" aria-hidden="true"></i> {{t "Send automatically to new addresses"}}
-                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (batches of 20, 20 to 75 seconds apart, 1 to 3 minutes between batches). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send. A Zoho block stops the run and automatic sending waits 30 minutes."}}</small>
+                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (however many are set at once, then 20 to 75 seconds, and 3 to 6 minutes after every 12). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send. A Zoho block stops the run and automatic sending waits 30 minutes."}}</small>
                     </span>
                 </label>
                 <label class="check" for="auto_resend">
@@ -509,30 +663,26 @@
             return;
         }
 
-        file.addEventListener("change", function () {
-            var picked = file.files && file.files[0];
-            if (!picked) {
-                return;
-            }
-            if (picked.size > maxBytes) {
-                showResult({{t "That HTML file is too long."}}, true);
-                file.value = "";
-                return;
-            }
-            var reader = new FileReader();
-            reader.onload = function () {
-                document.getElementById("body").value = String(reader.result || "");
-                document.getElementById("format").value = "html";
-                showResult({{t "HTML loaded into the editor. Save to keep it."}}, false);
-            };
-            reader.readAsText(picked);
-        });
-
-        document.getElementById("mail-check").addEventListener("click", function () {
-            postJSON("/campaigns/" + form.dataset.id + "/mail/check", function (data) {
-                showResult(data.ok ? data.notice : data.error, !data.ok);
+        if (file) {
+            file.addEventListener("change", function () {
+                var picked = file.files && file.files[0];
+                if (!picked) {
+                    return;
+                }
+                if (picked.size > maxBytes) {
+                    showResult({{t "That HTML file is too long."}}, true);
+                    file.value = "";
+                    return;
+                }
+                var reader = new FileReader();
+                reader.onload = function () {
+                    document.getElementById("body").value = String(reader.result || "");
+                    document.getElementById("format").value = "html";
+                    showResult({{t "HTML loaded into the editor. Save to keep it."}}, false);
+                };
+                reader.readAsText(picked);
             });
-        });
+        }
 
         document.getElementById("mail-preview").addEventListener("click", function () {
             postJSON("/campaigns/" + form.dataset.id + "/mail/preview", function (data) {
@@ -584,6 +734,23 @@
             result.className = isError ? "notice notice-error" : "notice notice-success";
             result.setAttribute("role", isError ? "alert" : "status");
         }
+    })();
+    </script>
+    <script>
+    (function () {
+        var auto = document.querySelector(".auto-dispatch");
+        var field = document.getElementById("send_at_once");
+        if (!auto || !field) return;
+        auto.addEventListener("submit", function () {
+            var hidden = auto.querySelector('input[name="send_at_once"]');
+            if (!hidden) {
+                hidden = document.createElement("input");
+                hidden.type = "hidden";
+                hidden.name = "send_at_once";
+                auto.appendChild(hidden);
+            }
+            hidden.value = field.value;
+        });
     })();
     </script>
 </body>

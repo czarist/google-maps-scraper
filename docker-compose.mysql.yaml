@@ -68,6 +68,7 @@ services:
       - path: .env
         required: false
     environment:
+      TZ: America/Sao_Paulo
       MYSQL_DSN: "gmaps:gmaps@tcp(mysql:3306)/gmaps?parseTime=true&charset=utf8mb4"
     command: ["-data-folder", "/gmapsdata"]
     ports:

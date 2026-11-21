@@ -46,15 +46,15 @@ const (
 	// DefaultResendAfter is the default wait before an address can get the same campaign again.
 	DefaultResendAfter = 4 * 24 * time.Hour
 
-	// mailMinWait and mailMaxWait bound the random pause between two messages
-	// in a batch. Same window as lg-prospector's mailman intra-batch pause.
+	// mailMinWait and mailMaxWait bound the random pause after a wave.
+	// One at a time, a wave is a single message. Same window as lg-prospector.
 	mailMinWait = 20 * time.Second
 	mailMaxWait = 75 * time.Second
 	// mailBatchSize is how many messages go out before the longer batch pause.
-	mailBatchSize = 20
+	mailBatchSize = 12
 	// mailBatchMinGap and mailBatchMaxGap bound the random pause between batches.
-	mailBatchMinGap = 1 * time.Minute
-	mailBatchMaxGap = 3 * time.Minute
+	mailBatchMinGap = 3 * time.Minute
+	mailBatchMaxGap = 6 * time.Minute
 	// providerBlockCooldown is how long automatic sending waits after Zoho
 	// refuses the account. A manual send still starts immediately.
 	providerBlockCooldown = 30 * time.Minute
@@ -161,6 +161,12 @@ func (c *MailConfig) Normalize() MailConfig {
 
 	if c.Encryption == "" {
 		c.Encryption = MailStartTLS
+	}
+
+	// Port 465 speaks TLS immediately. STARTTLS there waits for a banner that
+	// never comes and the read times out.
+	if c.Port == 465 && c.Encryption == MailStartTLS {
+		c.Encryption = MailSSL
 	}
 
 	if c.Format != MailFormatHTML {
@@ -292,18 +298,23 @@ type DispatchPreview struct {
 	MissingResults int
 }
 
-// CampaignStore persists campaigns. The SQLite job repository implements it.
 // MailLogEntry is the latest send result for one address of a campaign.
 type MailLogEntry struct {
-	Email  string
-	Status string
-	Error  string
-	SentAt time.Time
+	Email     string
+	Status    string
+	Error     string
+	FromEmail string
+	SentAt    time.Time
 }
 
 // SentLabel is the UTC send time for tables.
 func (e MailLogEntry) SentLabel() string {
 	return e.SentAt.UTC().Format("2006-01-02 15:04")
+}
+
+// SentLocal is the send time in the process timezone.
+func (e MailLogEntry) SentLocal() string {
+	return e.SentAt.In(time.Local).Format("2006-01-02 15:04")
 }
 
 type CampaignStore interface {
@@ -331,6 +342,13 @@ type CampaignStore interface {
 	// Unsubscribed addresses are always included.
 	SentEmailsSince(context.Context, string, time.Time) (map[string]struct{}, error)
 	RecordMail(context.Context, string, string, string, string) error
+	// RecordMailFrom is RecordMail that also stores the sender address.
+	RecordMailFrom(context.Context, string, string, string, string, string) error
+	// RecordSenderResult appends one attempt for the sender counts. It does not
+	// change whether that address counts as sent or failed.
+	RecordSenderResult(context.Context, string, string, string, string, string) error
+	// SenderLog is every recorded attempt, newest first.
+	SenderLog(context.Context, string) ([]MailLogEntry, error)
 	// RequeueFailed forgets the failed sends of a campaign so those addresses
 	// wait to be sent again. It returns how many addresses were requeued.
 	RequeueFailed(context.Context, string) (int, error)

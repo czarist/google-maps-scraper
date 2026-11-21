@@ -101,6 +101,10 @@ func New(svc *Service, addr string) (*Server, error) {
 	mux.HandleFunc("/campaigns/{id}/dispatch/pause", ans.campaignDispatchPause)
 	mux.HandleFunc("/campaigns/{id}/dispatch/resume", ans.campaignDispatchResume)
 	mux.HandleFunc("/campaigns/{id}/auto", ans.campaignAuto)
+	mux.HandleFunc("/campaigns/{id}/smtp", ans.campaignSMTPAdd)
+	mux.HandleFunc("/campaigns/{id}/smtp/remove", ans.campaignSMTPRemove)
+	mux.HandleFunc("/campaigns/{id}/senders/save", ans.campaignSenderSave)
+	mux.HandleFunc("/campaigns/{id}/senders/check", ans.campaignSenderCheck)
 	mux.HandleFunc("/campaigns/{id}/leads.csv", ans.campaignLeads)
 	mux.HandleFunc("/view", func(w http.ResponseWriter, r *http.Request) {
 		r = requestWithID(r)

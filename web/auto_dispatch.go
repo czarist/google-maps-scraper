@@ -22,6 +22,8 @@ type AutoDispatch struct {
 	// Resend also sends again to addresses whose last send is older than ResendAfterDays.
 	Resend          bool
 	ResendAfterDays int
+	// AtOnce is how many emails leave together. Zero means one at send time.
+	AtOnce int
 }
 
 // ResendAfter is ResendAfterDays as a duration.
@@ -88,6 +90,23 @@ func (s *Service) SaveAutoDispatch(ctx context.Context, campaignID string, a Aut
 	return store.SaveAutoDispatch(ctx, campaignID, a)
 }
 
+// SetSendAtOnce stores how many emails leave together and keeps the rest of the
+// automatic-sending setting. n is at least 1. There is no maximum.
+func (s *Service) SetSendAtOnce(ctx context.Context, campaignID string, n int) error {
+	if n < 1 {
+		return errors.New("send at once must be a whole number, 1 or more")
+	}
+
+	a, err := s.GetAutoDispatch(ctx, campaignID)
+	if err != nil {
+		return err
+	}
+
+	a.AtOnce = n
+
+	return s.SaveAutoDispatch(ctx, campaignID, a)
+}
+
 // RunAutoDispatch checks every interval for campaigns with automatic sending on
 // and starts a send when they have addresses waiting. It stops when ctx ends.
 func (s *Service) RunAutoDispatch(ctx context.Context, send MailSender, interval time.Duration) {
@@ -140,6 +159,7 @@ func (s *Service) AutoDispatchOnce(ctx context.Context, send MailSender) {
 			ResendAfter: a.ResendAfter(),
 			SkipFailed:  true,
 			Quiet:       true,
+			AtOnce:      a.AtOnce,
 		}, send)
 
 		switch {

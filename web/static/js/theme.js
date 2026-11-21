@@ -133,6 +133,149 @@
     });
 }());
 
+// Per-sender error log, editor, and connection test. The list is refreshed in
+// place, so the dialogs stay outside that region and are filled from the
+// clicked sender's <template>. An open editor is not refilled by the poll.
+(function () {
+    if (window.__gmsSenderLogs) {
+        return;
+    }
+    window.__gmsSenderLogs = true;
+
+    function pt() {
+        return /^pt/i.test(document.documentElement.lang || '');
+    }
+
+    function fillLog(id) {
+        var dlg = document.getElementById('sender-log-dialog');
+        var tpl = id && document.getElementById(id);
+        if (!dlg || !tpl || !tpl.content) {
+            return;
+        }
+
+        var body = dlg.querySelector('[data-sender-log-body]');
+        if (body) {
+            body.replaceChildren(tpl.content.cloneNode(true));
+        }
+    }
+
+    function openEdit(btn) {
+        var dlg = document.getElementById('sender-edit-dialog');
+        var id = btn.getAttribute('data-sender-edit');
+        var tpl = id && document.getElementById(id);
+        if (!dlg || !tpl || !tpl.content || typeof dlg.showModal !== 'function') {
+            return;
+        }
+
+        var body = dlg.querySelector('[data-sender-edit-body]');
+        if (body) {
+            body.replaceChildren(tpl.content.cloneNode(true));
+        }
+
+        var title = dlg.querySelector('[data-sender-edit-title]');
+        if (title) {
+            title.textContent = btn.getAttribute('data-sender-title') || '';
+        }
+
+        if (!dlg.open) {
+            dlg.showModal();
+        }
+
+        var first = dlg.querySelector('input:not([type=hidden]), select, textarea');
+        if (first) {
+            first.focus();
+        }
+    }
+
+    function showCheck(message, isError) {
+        var el = document.getElementById('sender-check-result');
+        if (!el) {
+            return;
+        }
+
+        el.hidden = false;
+        el.textContent = message;
+        el.className = isError ? 'notice notice-error' : 'notice notice-success';
+        el.setAttribute('role', isError ? 'alert' : 'status');
+    }
+
+    function runCheck(btn) {
+        var url = btn.getAttribute('data-sender-check-url');
+        if (!url) {
+            return;
+        }
+
+        showCheck('…', false);
+        var body = new URLSearchParams();
+        body.set('smtp_id', btn.getAttribute('data-sender-check') || '');
+        fetch(url, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            body: body.toString()
+        }).then(function (res) {
+            return res.json();
+        }).then(function (data) {
+            showCheck(data.ok ? data.notice : (data.error || ''), !data.ok);
+        }).catch(function () {
+            showCheck(pt() ? 'Não foi possível acessar o servidor.' : 'Could not reach the server.', true);
+        });
+    }
+
+    document.addEventListener('click', function (e) {
+        var t = e.target;
+        if (!t || !t.closest) {
+            return;
+        }
+
+        var edit = t.closest('[data-sender-edit]');
+        if (edit) {
+            openEdit(edit);
+            return;
+        }
+
+        var check = t.closest('[data-sender-check]');
+        if (check) {
+            runCheck(check);
+            return;
+        }
+
+        var btn = t.closest('[data-sender-log]');
+        if (!btn) {
+            return;
+        }
+
+        var dlg = document.getElementById('sender-log-dialog');
+        var id = btn.getAttribute('data-sender-log');
+        if (!dlg || typeof dlg.showModal !== 'function') {
+            return;
+        }
+
+        var title = dlg.querySelector('[data-sender-log-title]');
+        if (title) {
+            title.textContent = btn.getAttribute('data-sender-title') || '';
+        }
+
+        dlg.setAttribute('data-open-sender', id || '');
+        fillLog(id);
+
+        if (!dlg.open) {
+            dlg.showModal();
+        }
+    });
+
+    document.addEventListener('htmx:oobAfterSwap', function () {
+        var dlg = document.getElementById('sender-log-dialog');
+        if (!dlg || !dlg.open) {
+            return;
+        }
+
+        fillLog(dlg.getAttribute('data-open-sender'));
+    });
+}());
+
 // Confirmation and status modals that replace window.confirm/alert.
 //   gmsConfirm(message, {title, okLabel, danger}) -> Promise<boolean>
 //   gmsAlert(message, {title, kind: 'success'|'error'|'info'}) -> Promise<void>
