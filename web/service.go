@@ -26,6 +26,8 @@ type Service struct {
 	// dispatchSleep and dispatchWait replace the paced-send clock in tests.
 	dispatchSleep func(context.Context, time.Duration)
 	dispatchWait  func(lo, hi time.Duration) time.Duration
+	// dispatchNow replaces the clock that decides when a refused sender returns.
+	dispatchNow func() time.Time
 
 	// proxyScrape supplies the default proxies when PROXYSCRAPE_API_KEY is set.
 	proxyScrape *ProxyScrape

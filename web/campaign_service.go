@@ -864,7 +864,23 @@ type dispatchProgress struct {
 	sent, failed, unsubscribed int
 	firstErr                   string
 	halt                       error
-	deadSenders                map[string]struct{}
+	// deadSenders holds, per sender, when it may be tried again after a login
+	// refusal. A refusal is often a provider's temporary hold, so the sender
+	// comes back on its own instead of sitting out a run that can last days.
+	deadSenders map[string]time.Time
+	now         func() time.Time
+}
+
+// senderRetryAfter is how long a sender whose login was refused stays out of
+// the rotation before the run tries it again.
+const senderRetryAfter = 30 * time.Minute
+
+func (p *dispatchProgress) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+
+	return time.Now()
 }
 
 func (p *dispatchProgress) snapshot() (sent, failed, unsubscribed int, firstErr string, halt error) {
@@ -899,9 +915,21 @@ func (p *dispatchProgress) senderDead(cfg MailConfig) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	_, ok := p.deadSenders[senderKey(cfg)]
+	key := senderKey(cfg)
 
-	return ok
+	until, ok := p.deadSenders[key]
+	if !ok {
+		return false
+	}
+
+	if p.clock().Before(until) {
+		return true
+	}
+
+	delete(p.deadSenders, key)
+	log.Printf("sender %s is back in the rotation", cfg.FromEmail)
+
+	return false
 }
 
 func (p *dispatchProgress) killSender(cfg MailConfig) {
@@ -909,10 +937,21 @@ func (p *dispatchProgress) killSender(cfg MailConfig) {
 	defer p.mu.Unlock()
 
 	if p.deadSenders == nil {
-		p.deadSenders = map[string]struct{}{}
+		p.deadSenders = map[string]time.Time{}
 	}
 
-	p.deadSenders[senderKey(cfg)] = struct{}{}
+	until := p.clock().Add(senderRetryAfter)
+	p.deadSenders[senderKey(cfg)] = until
+	log.Printf("sender %s refused the login; trying it again at %s", cfg.FromEmail, until.Format(time.TimeOnly))
+}
+
+// reviveSenders puts every sender back in the rotation. Saved settings may
+// hold a fixed password, so they get a fresh try right away.
+func (p *dispatchProgress) reviveSenders() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	clear(p.deadSenders)
 }
 
 func (p *dispatchProgress) setHalt(err error) {
@@ -942,7 +981,7 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 	_ = atOnce
 	msgs = uniqueRecipients(msgs)
 
-	prog := &dispatchProgress{failed: renderFailed}
+	prog := &dispatchProgress{failed: renderFailed, now: s.dispatchNow}
 
 	for {
 		sent, failed, unsubscribed, _, halt := prog.snapshot()
@@ -951,7 +990,9 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		}
 
 		// Pause and SMTP reload happen before the wave, so a wave shares one cfg.
-		s.dispatchCheckpoint(ctx, store, ctl, campaignID, dispatchID, cfg, sent, failed, skipped+unsubscribed)
+		if s.dispatchCheckpoint(ctx, store, ctl, campaignID, dispatchID, cfg, sent, failed, skipped+unsubscribed) {
+			prog.reviveSenders()
+		}
 
 		extras := s.smtpAccounts(ctx, campaignID)
 		accounts := liveAccounts(*cfg, extras, prog.senderDead)

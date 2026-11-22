@@ -401,6 +401,99 @@ func TestRunDispatchKeepsSenderAfterTemporaryAuthFailure(t *testing.T) {
 	}
 }
 
+// refusedSenderRun sends six emails from a working sender and one whose first
+// login is refused. clock, when set, is the run's clock. between runs during
+// each pause and gets the service.
+func refusedSenderRun(t *testing.T, clock func() time.Time, between func(svc *Service)) (uhCalls int, store *memStore) {
+	t.Helper()
+
+	store = newMemStore()
+	store.dispatches = []Dispatch{{
+		ID: "disp", CampaignID: "camp", Status: DispatchRunning, StartedAt: time.Now().UTC(),
+	}}
+	store.smtp = map[string][]SMTPAccount{
+		"camp": {{
+			ID: "extra", Host: "uh.example", Port: 465, Username: "uh", Password: "secret-2",
+			Encryption: MailSSL, FromEmail: "two@example.com",
+		}},
+	}
+
+	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
+	svc.dispatchSleep = func(context.Context, time.Duration) { between(svc) }
+	svc.dispatchNow = clock
+
+	msgs := make([]renderedMail, 6)
+	for i := range msgs {
+		msgs[i] = renderedMail{To: fmt.Sprintf("user%02d@example.com", i), Subject: "Same", Body: "Same body"}
+	}
+
+	var mu sync.Mutex
+
+	send := func(_ context.Context, cfg *MailConfig, _ *OutgoingMail) error {
+		mu.Lock()
+		defer mu.Unlock()
+
+		if cfg.Host != "uh.example" {
+			return nil
+		}
+
+		uhCalls++
+		if uhCalls == 1 {
+			return errors.New(`535 "5.7.8 Authentication Failed"`)
+		}
+
+		return nil
+	}
+
+	primary := MailConfig{Host: "one.example", Username: "one", FromEmail: "one@example.com", Password: "secret-1"}
+	svc.runDispatch("camp", "disp", ServiceTrentin, &primary, msgs, 0, 0, 0, send, 1)
+
+	for i := range msgs {
+		if store.sent["camp"][msgs[i].To] != MailStatusSent {
+			t.Fatalf("%s status %q", msgs[i].To, store.sent["camp"][msgs[i].To])
+		}
+	}
+
+	return uhCalls, store
+}
+
+func TestRunDispatchRetriesRefusedSenderAfterCooldown(t *testing.T) {
+	// The refusal is stamped with the real clock; each pause moves half a cooldown on.
+	now := time.Now()
+
+	uhCalls, _ := refusedSenderRun(t, func() time.Time { return now }, func(*Service) {
+		now = now.Add(senderRetryAfter / 2)
+	})
+
+	if uhCalls < 2 {
+		t.Fatalf("refused sender was not tried again after the cooldown (%d calls)", uhCalls)
+	}
+}
+
+func TestRunDispatchKeepsRefusedSenderOutDuringCooldown(t *testing.T) {
+	uhCalls, _ := refusedSenderRun(t, nil, func(*Service) {})
+
+	if uhCalls != 1 {
+		t.Fatalf("refused sender tried %d times inside its cooldown", uhCalls)
+	}
+}
+
+func TestRunDispatchRetriesRefusedSenderWhenSettingsSaved(t *testing.T) {
+	saved := false
+
+	uhCalls, _ := refusedSenderRun(t, nil, func(svc *Service) {
+		if !saved {
+			saved = true
+
+			svc.mailSettingsChanged("camp")
+		}
+	})
+
+	if uhCalls < 2 {
+		t.Fatalf("saving the settings did not bring the sender back (%d calls)", uhCalls)
+	}
+}
+
 func TestParseAtOnce(t *testing.T) {
 	ok := []struct {
 		raw  string

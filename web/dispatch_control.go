@@ -151,9 +151,10 @@ func (s *Service) mailSettingsChanged(campaignID string) {
 // dispatchCheckpoint runs before each wave: it waits while the run is paused
 // and applies SMTP settings saved since the last wave. One at a time, that is
 // before every message. Emails already leaving finish on the settings they started with.
-func (s *Service) dispatchCheckpoint(ctx context.Context, store CampaignStore, ctl *dispatchControl, campaignID, dispatchID string, cfg *MailConfig, sent, failed, skipped int) {
+// It reports whether the settings were read again.
+func (s *Service) dispatchCheckpoint(ctx context.Context, store CampaignStore, ctl *dispatchControl, campaignID, dispatchID string, cfg *MailConfig, sent, failed, skipped int) bool {
 	if ctl == nil {
-		return
+		return false
 	}
 
 	ctl.mu.Lock()
@@ -177,6 +178,8 @@ func (s *Service) dispatchCheckpoint(ctx context.Context, store CampaignStore, c
 	if reload {
 		s.reloadTransport(ctx, store, campaignID, cfg)
 	}
+
+	return reload
 }
 
 // reloadTransport copies the saved server, login and sender into cfg. Subject
