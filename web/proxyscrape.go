@@ -29,6 +29,7 @@ const (
 	envProxyScrapeProtocol    = "PROXYSCRAPE_PROTOCOL"
 	envProxyScrapeCountry     = "PROXYSCRAPE_COUNTRY"
 	envProxyScrapeResidential = "PROXYSCRAPE_RESIDENTIAL_GATEWAY"
+	envProxyScrapeSubaccounts = "PROXYSCRAPE_SUBACCOUNTS"
 )
 
 // ErrProxyScrapeDisabled means PROXYSCRAPE_API_KEY is not set.
@@ -40,6 +41,8 @@ type ProxyScrape struct {
 	protocol           string // http or socks
 	country            string // ISO alpha-2, empty for all
 	residentialGateway string // host:port, empty to skip residential plans
+	// onlySubaccounts, when not empty, is the set of plan IDs to use. Others are ignored.
+	onlySubaccounts map[string]struct{}
 	baseURL            string
 	client             *http.Client
 
@@ -68,10 +71,27 @@ func NewProxyScrapeFromEnv() *ProxyScrape {
 		protocol:           protocol,
 		country:            strings.ToLower(strings.TrimSpace(os.Getenv(envProxyScrapeCountry))),
 		residentialGateway: strings.TrimSpace(os.Getenv(envProxyScrapeResidential)),
+		onlySubaccounts:    parseSubaccountIDs(os.Getenv(envProxyScrapeSubaccounts)),
 		baseURL:            proxyScrapeBaseURL,
 		client:             &http.Client{Timeout: proxyScrapeTimeout},
 		cacheTime:          time.Now,
 	}
+}
+
+// parseSubaccountIDs reads a comma or space separated list of plan IDs.
+// It returns nil for an empty list, which means every plan.
+func parseSubaccountIDs(raw string) map[string]struct{} {
+	fields := strings.FieldsFunc(raw, func(r rune) bool { return r == ',' || r == ';' || r == ' ' || r == '	' })
+	if len(fields) == 0 {
+		return nil
+	}
+
+	out := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		out[strings.ToLower(f)] = struct{}{}
+	}
+
+	return out
 }
 
 // ProxyScrapeSubaccount is one plan (subaccount) of the account.
@@ -198,7 +218,8 @@ func apiErrorMessage(raw []byte) string {
 	return msg
 }
 
-// Subaccounts lists the account's plans.
+// Subaccounts lists the account's plans. When PROXYSCRAPE_SUBACCOUNTS is set,
+// only those plans are listed.
 func (p *ProxyScrape) Subaccounts(ctx context.Context) ([]ProxyScrapeSubaccount, error) {
 	raw, err := p.do(ctx, http.MethodGet, "/subaccounts", nil, nil)
 	if err != nil {
@@ -215,7 +236,22 @@ func (p *ProxyScrape) Subaccounts(ctx context.Context) ([]ProxyScrapeSubaccount,
 		return nil, fmt.Errorf("parse subaccounts: %w", err)
 	}
 
-	return resp.Data.Subaccounts, nil
+	return p.allowedSubaccounts(resp.Data.Subaccounts), nil
+}
+
+func (p *ProxyScrape) allowedSubaccounts(subs []ProxyScrapeSubaccount) []ProxyScrapeSubaccount {
+	if len(p.onlySubaccounts) == 0 {
+		return subs
+	}
+
+	out := make([]ProxyScrapeSubaccount, 0, len(subs))
+	for _, sub := range subs {
+		if _, ok := p.onlySubaccounts[strings.ToLower(strings.TrimSpace(sub.AccountID))]; ok {
+			out = append(out, sub)
+		}
+	}
+
+	return out
 }
 
 // Balance returns the wallet balance. Needs API ordering enabled by ProxyScrape support.

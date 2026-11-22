@@ -92,6 +92,24 @@ func TestProxyScrapeFallsBackToIPAuth(t *testing.T) {
 	}
 }
 
+func TestProxyScrapeOnlyListedSubaccounts(t *testing.T) {
+	ps := newTestProxyScrape(t, true)
+	ps.onlySubaccounts = parseSubaccountIDs(" RES1 ")
+
+	got, err := ps.FetchProxies(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 1 || got[0] != "http://ruser-country-br:rpass@rp.scrapegw.com:6060" {
+		t.Fatalf("got %v, want only the res1 proxy", got)
+	}
+
+	if parseSubaccountIDs(" , ") != nil {
+		t.Fatal("blank list should mean every plan")
+	}
+}
+
 func TestProxyScrapeBadKey(t *testing.T) {
 	ps := newTestProxyScrape(t, true)
 	ps.apiKey = "wrong"
