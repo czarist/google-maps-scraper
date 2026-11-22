@@ -131,6 +131,38 @@ func mailAccountAt(primary MailConfig, extras []SMTPAccount, index int) MailConf
 	return out
 }
 
+// liveAccounts is one entry per sender that dead does not reject, in send order.
+// A wave sends one email from each of them at the same time.
+func liveAccounts(primary MailConfig, extras []SMTPAccount, dead func(MailConfig) bool) []MailConfig {
+	n := 1 + len(extras)
+	out := make([]MailConfig, 0, n)
+
+	for i := range n {
+		cfg := mailAccountAt(primary, extras, i)
+		if dead != nil && dead(cfg) {
+			continue
+		}
+
+		out = append(out, cfg)
+	}
+
+	return out
+}
+
+// senderSlot is the position of account in the full send order.
+func senderSlot(primary MailConfig, extras []SMTPAccount, account MailConfig) int {
+	n := 1 + len(extras)
+	key := senderKey(account)
+
+	for i := range n {
+		if senderKey(mailAccountAt(primary, extras, i)) == key {
+			return i
+		}
+	}
+
+	return 0
+}
+
 // nextLiveAccount walks the send order from start and returns the first server
 // that dead does not reject. It reports false when every server is rejected.
 func nextLiveAccount(primary MailConfig, extras []SMTPAccount, start int, dead func(MailConfig) bool) (MailConfig, bool) {

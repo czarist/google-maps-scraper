@@ -441,6 +441,14 @@ func TestRunDispatchSendsTogetherWithoutRepeats(t *testing.T) {
 		StartedAt:  time.Now().UTC(),
 	}}
 
+	store.smtp = map[string][]SMTPAccount{
+		"camp": {
+			{ID: "e1", Host: "two.example", Username: "two", Password: "p", FromEmail: "two@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e2", Host: "three.example", Username: "three", Password: "p", FromEmail: "three@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e3", Host: "four.example", Username: "four", Password: "p", FromEmail: "four@example.com", Encryption: MailSSL, Port: 465},
+		},
+	}
+
 	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
 
 	var details []string
@@ -455,6 +463,9 @@ func TestRunDispatchSendsTogetherWithoutRepeats(t *testing.T) {
 	for i := range msgs {
 		msgs[i] = renderedMail{To: fmt.Sprintf("user%02d@example.com", i), Subject: "Hi", Body: "Body"}
 	}
+
+	// The same address again must not leave a second time.
+	msgs = append(msgs, renderedMail{To: "user00@example.com", Subject: "Hi", Body: "Body"})
 
 	var (
 		mu          sync.Mutex
@@ -527,7 +538,7 @@ func TestRunDispatchSendsTogetherWithoutRepeats(t *testing.T) {
 		t.Fatalf("dispatch %+v", final)
 	}
 
-	// Two full waves, then the last address. The pause is shared, and 9 is still inside the first batch of 15.
+	// Two full waves of one email per sender, then the last address. Nine sends stay inside the first batch of 12.
 	if len(details) != 2 {
 		t.Fatalf("pauses %d, want 2: %v", len(details), details)
 	}
@@ -549,6 +560,15 @@ func TestRunDispatchCapsTheWaveAtTheQueue(t *testing.T) {
 		Status:     DispatchRunning,
 		StartedAt:  time.Now().UTC(),
 	}}
+
+	store.smtp = map[string][]SMTPAccount{
+		"camp": {
+			{ID: "e1", Host: "two.example", Username: "two", Password: "p", FromEmail: "two@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e2", Host: "three.example", Username: "three", Password: "p", FromEmail: "three@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e3", Host: "four.example", Username: "four", Password: "p", FromEmail: "four@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e4", Host: "five.example", Username: "five", Password: "p", FromEmail: "five@example.com", Encryption: MailSSL, Port: 465},
+		},
+	}
 
 	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
 
@@ -630,6 +650,13 @@ func TestRunDispatchParallelStopsAfterTheBlockedWave(t *testing.T) {
 		Status:     DispatchRunning,
 		StartedAt:  time.Now().UTC(),
 	}}
+
+	store.smtp = map[string][]SMTPAccount{
+		"camp": {
+			{ID: "e1", Host: "two.example", Username: "two", Password: "p", FromEmail: "two@example.com", Encryption: MailSSL, Port: 465},
+			{ID: "e2", Host: "three.example", Username: "three", Password: "p", FromEmail: "three@example.com", Encryption: MailSSL, Port: 465},
+		},
+	}
 
 	svc := &Service{repo: store, optOut: &fakeOptOut{}, unsubscribeBase: testUnsubscribeBase}
 	svc.dispatchSleep = func(context.Context, time.Duration) {}

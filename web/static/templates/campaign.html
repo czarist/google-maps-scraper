@@ -409,7 +409,7 @@
             <h2><i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}</h2>
             <div id="live-dispatch-info">
             {{if .PreviewWarning}}<div class="notice notice-error" role="alert">{{t .PreviewWarning}}</div>{{end}}
-            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent. However many are set at once go out together, then wait 20 to 75 seconds, and 3 to 6 minutes after every 12."}}</p>
+            <p class="hint">{{t "%d ready, %d already sent, %d jobs with no results file." .Preview.Ready .Preview.AlreadySent .Preview.MissingResults}} {{t "Addresses come from the emails column of each job CSV. One run sends every address that is not already sent. Each sender sends one email at the same time, each to a different address, then waits 20 to 75 seconds, and 3 to 6 minutes after every 12. An address is never sent twice."}}</p>
             </div>
 
             <section class="smtp-extra" id="more-smtp" aria-labelledby="more-smtp-title">
@@ -443,13 +443,9 @@
                     <p class="hint">{{t "Applies only when sending again. 0 sends again to everyone."}}</p>
                 </div>
                 <div class="submit-row">
-                    <label class="at-once" for="send_at_once">
-                        <input type="number" id="send_at_once" name="send_at_once" value="{{if gt .Auto.AtOnce 0}}{{.Auto.AtOnce}}{{else}}1{{end}}" min="1" step="1" inputmode="numeric">
-                        <span>{{t "at once"}}</span>
-                    </label>
                     <button type="submit" class="btn-primary" id="live-dispatch-button" {{if .Running}}disabled{{end}}>{{if .Paused}}<i class="fas fa-pause" aria-hidden="true"></i> {{t "Paused"}}{{else if .Running}}<i class="fas fa-spinner fa-spin" aria-hidden="true"></i> {{t "Sending"}}{{else}}<i class="fas fa-paper-plane" aria-hidden="true"></i> {{t "Send emails"}}{{end}}</button>
                 </div>
-                <p class="hint">{{t "They leave together. Each one takes the next address in the queue and the next SMTP server."}}</p>
+                <p class="hint">{{t "Each sender sends at the same time. Each email goes to a different address, and an address is not sent again."}}</p>
             </form>
 
             <div id="live-dispatch-controls" class="submit-row dispatch-controls">
@@ -475,7 +471,7 @@
                     <input type="checkbox" id="auto_enabled" name="auto_enabled" {{if .Auto.Enabled}}checked{{end}}>
                     <span>
                         <i class="fas fa-robot" aria-hidden="true"></i> {{t "Send automatically to new addresses"}}
-                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (however many are set at once, then 20 to 75 seconds, and 3 to 6 minutes after every 12). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send. A Zoho block stops the run and automatic sending waits 30 minutes."}}</small>
+                        <small>{{t "Every minute, emails that the campaign's jobs find are queued and sent in the same rhythm (one email per sender at the same time, then 20 to 75 seconds, and 3 to 6 minutes after every 12). Unsubscribed addresses are always skipped. Addresses that failed are left for a manual send. A Zoho block stops the run and automatic sending waits 30 minutes."}}</small>
                     </span>
                 </label>
                 <label class="check" for="auto_resend">
@@ -734,23 +730,6 @@
             result.className = isError ? "notice notice-error" : "notice notice-success";
             result.setAttribute("role", isError ? "alert" : "status");
         }
-    })();
-    </script>
-    <script>
-    (function () {
-        var auto = document.querySelector(".auto-dispatch");
-        var field = document.getElementById("send_at_once");
-        if (!auto || !field) return;
-        auto.addEventListener("submit", function () {
-            var hidden = auto.querySelector('input[name="send_at_once"]');
-            if (!hidden) {
-                hidden = document.createElement("input");
-                hidden.type = "hidden";
-                hidden.name = "send_at_once";
-                auto.appendChild(hidden);
-            }
-            hidden.value = field.value;
-        });
     })();
     </script>
 </body>

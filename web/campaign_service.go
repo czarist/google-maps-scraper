@@ -937,13 +937,10 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		return
 	}
 
-	if atOnce < 1 {
-		atOnce = 1
-	}
-
-	if len(msgs) > 0 && atOnce > len(msgs) {
-		atOnce = len(msgs)
-	}
+	// One email per live sender. The saved "at once" number is not used:
+	// three senders leave three emails together, each to a different address.
+	_ = atOnce
+	msgs = uniqueRecipients(msgs)
 
 	prog := &dispatchProgress{failed: renderFailed}
 
@@ -956,17 +953,28 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		// Pause and SMTP reload happen before the wave, so a wave shares one cfg.
 		s.dispatchCheckpoint(ctx, store, ctl, campaignID, dispatchID, cfg, sent, failed, skipped+unsubscribed)
 
-		start, end, ok := prog.claim(atOnce, len(msgs))
+		extras := s.smtpAccounts(ctx, campaignID)
+		accounts := liveAccounts(*cfg, extras, prog.senderDead)
+		if len(accounts) == 0 {
+			prog.setHalt(errSenderLogin)
+
+			break
+		}
+
+		start, end, ok := prog.claim(len(accounts), len(msgs))
 		if !ok {
 			break
+		}
+
+		if end-start < len(accounts) {
+			accounts = accounts[:end-start]
 		}
 
 		sentBefore, failedBefore, _, _, _ := prog.snapshot()
 
 		wave := msgs[start:end]
-		extras := s.smtpAccounts(ctx, campaignID)
 
-		s.sendWave(ctx, store, prog, service, campaignID, dispatchID, wave, *cfg, extras, start, send)
+		s.sendWave(ctx, store, prog, service, campaignID, dispatchID, wave, *cfg, extras, accounts, send)
 
 		sent, failed, unsubscribed, _, halt = prog.snapshot()
 		if halt != nil || end >= len(msgs) {
@@ -1026,27 +1034,31 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 	}
 }
 
-// sendWave delivers wave. A single message stays on this goroutine, so one at a
-// time keeps today's order. A larger wave leaves together. The messages were
-// already claimed, so two sends cannot take the same address.
-func (s *Service) sendWave(ctx context.Context, store CampaignStore, prog *dispatchProgress, service, campaignID, dispatchID string, wave []renderedMail, primary MailConfig, extras []SMTPAccount, start int, send MailSender) {
+// sendWave delivers wave. Each slot is one live sender and one address.
+// A single message stays on this goroutine. A larger wave leaves together.
+// The messages were already claimed, so two sends cannot take the same address.
+func (s *Service) sendWave(ctx context.Context, store CampaignStore, prog *dispatchProgress, service, campaignID, dispatchID string, wave []renderedMail, primary MailConfig, extras []SMTPAccount, accounts []MailConfig, send MailSender) {
 	// A login rejection is the sender's fault. Try the next live sender for
 	// that same address, and leave the rejected sender out for the rest of the run.
 	deliver := func(offset int) {
-		index := start + offset
-		account := mailAccountAt(primary, extras, index)
+		if offset >= len(accounts) || offset >= len(wave) {
+			return
+		}
+
+		slot := senderSlot(primary, extras, accounts[offset])
+		account := accounts[offset]
 		tries := 1 + len(extras)
 
 		for try := 0; try < tries; try++ {
 			if prog.senderDead(account) {
-				next, ok := nextLiveAccount(primary, extras, index+1, prog.senderDead)
+				next, ok := nextLiveAccount(primary, extras, slot+1, prog.senderDead)
 				if !ok {
 					prog.setHalt(errSenderLogin)
 
 					return
 				}
 
-				index++
+				slot++
 				account = next
 
 				continue
@@ -1060,14 +1072,14 @@ func (s *Service) sendWave(ctx context.Context, store CampaignStore, prog *dispa
 
 				s.recordSenderResult(ctx, store, campaignID, wave[offset].To, MailStatusFailed, sendErr.Error(), account.FromEmail)
 
-				next, ok := nextLiveAccount(primary, extras, index+1, prog.senderDead)
+				next, ok := nextLiveAccount(primary, extras, slot+1, prog.senderDead)
 				if !ok {
 					prog.setHalt(fmt.Errorf("%w: %s", errSenderLogin, sendErr.Error()))
 
 					return
 				}
 
-				index++
+				slot++
 				account = next
 
 				continue
@@ -1344,6 +1356,28 @@ func randomBetween(lo, hi time.Duration) time.Duration {
 	span := int64(hi - lo)
 
 	return lo + time.Duration(rand.Int64N(span+1)) //nolint:gosec // G404: the pause jitter is not a secret.
+}
+
+// uniqueRecipients keeps the first copy of each address. Later copies are not sent.
+func uniqueRecipients(msgs []renderedMail) []renderedMail {
+	seen := make(map[string]struct{}, len(msgs))
+	out := make([]renderedMail, 0, len(msgs))
+
+	for i := range msgs {
+		key := strings.ToLower(strings.TrimSpace(msgs[i].To))
+		if key == "" {
+			continue
+		}
+
+		if _, ok := seen[key]; ok {
+			continue
+		}
+
+		seen[key] = struct{}{}
+		out = append(out, msgs[i])
+	}
+
+	return out
 }
 
 func trimDetail(s string) string {
