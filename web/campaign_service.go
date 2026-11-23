@@ -1028,6 +1028,8 @@ func (s *Service) runDispatch(campaignID, dispatchID, service string, cfg *MailC
 		}
 
 		wait, detail := s.nextPause(sent, failed, skipped+unsubscribed, end-start, end/mailBatchSize > start/mailBatchSize)
+		detail += " " + timeLeftLabel(wait, end, len(msgs), end-start)
+
 		if err := s.writeDispatchProgress(ctx, store, dispatchID, sent, failed, skipped+unsubscribed, detail); err != nil {
 			log.Printf("update dispatch %s: %v", dispatchID, err)
 		}
@@ -1344,6 +1346,55 @@ func (s *Service) nextPause(sent, failed, skipped, together int, batchGap bool) 
 	)
 
 	return wait, detail
+}
+
+// estimateTimeLeft guesses how long the rest of a dispatch takes. wait is the
+// pause about to start, done how many messages were claimed so far, total the
+// queue size and senders how many emails go out per wave. Pauses count at the
+// middle of their random range; the send itself is not counted.
+func estimateTimeLeft(wait time.Duration, done, total, senders int) time.Duration {
+	remaining := total - done
+	if remaining <= 0 {
+		return 0
+	}
+
+	senders = max(senders, 1)
+	waves := (remaining + senders - 1) / senders
+	pauses := waves - 1 // nothing waits after the last wave
+
+	// A wave that crosses a multiple of mailBatchSize waits the batch gap.
+	gaps := min(max((total-1)/mailBatchSize-done/mailBatchSize, 0), pauses)
+
+	avgWait := (mailMinWait + mailMaxWait) / 2
+	avgGap := (mailBatchMinGap + mailBatchMaxGap) / 2
+
+	return wait + time.Duration(pauses-gaps)*avgWait + time.Duration(gaps)*avgGap
+}
+
+// timeLeftLabel is the progress text for estimateTimeLeft, e.g.
+// "About 1h 20m left for 95 emails."
+func timeLeftLabel(wait time.Duration, done, total, senders int) string {
+	left := estimateTimeLeft(wait, done, total, senders)
+	remaining := max(total-done, 0)
+
+	return fmt.Sprintf("About %s left for %d emails.", roughDuration(left), remaining)
+}
+
+// roughDuration formats d to the minute: "under a minute", "45m", "3h 05m".
+func roughDuration(d time.Duration) string {
+	d = d.Round(time.Minute)
+	if d < time.Minute {
+		return "under a minute"
+	}
+
+	h := int(d / time.Hour)
+	m := int((d % time.Hour) / time.Minute)
+
+	if h == 0 {
+		return fmt.Sprintf("%dm", m)
+	}
+
+	return fmt.Sprintf("%dh %02dm", h, m)
 }
 
 func (s *Service) writeDispatchProgress(ctx context.Context, store CampaignStore, dispatchID string, sent, failed, skipped int, detail string) error {

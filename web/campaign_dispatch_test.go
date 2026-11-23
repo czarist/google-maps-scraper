@@ -809,3 +809,43 @@ func TestRunDispatchParallelStopsAfterTheBlockedWave(t *testing.T) {
 		t.Fatalf("detail %s status %s", final.Detail, final.Status)
 	}
 }
+
+func TestEstimateTimeLeft(t *testing.T) {
+	avgWait := (mailMinWait + mailMaxWait) / 2
+	avgGap := (mailBatchMinGap + mailBatchMaxGap) / 2
+
+	cases := []struct {
+		name                 string
+		wait                 time.Duration
+		done, total, senders int
+		want                 time.Duration
+	}{
+		{"nothing left", time.Minute, 10, 10, 1, 0},
+		{"last wave only", 30 * time.Second, 9, 10, 1, 30 * time.Second},
+		{"one sender, no batch gap", 30 * time.Second, 1, 5, 1, 30*time.Second + 3*avgWait},
+		{"one sender crosses a batch", 30 * time.Second, 10, 20, 1, 30*time.Second + 8*avgWait + avgGap},
+		{"three senders", 30 * time.Second, 3, 9, 3, 30*time.Second + avgWait},
+		{"zero senders counts as one", 0, 0, 3, 0, 2 * avgWait},
+	}
+
+	for _, tc := range cases {
+		if got := estimateTimeLeft(tc.wait, tc.done, tc.total, tc.senders); got != tc.want {
+			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
+		}
+	}
+}
+
+func TestRoughDuration(t *testing.T) {
+	cases := map[time.Duration]string{
+		20 * time.Second:            "under a minute",
+		45 * time.Minute:            "45m",
+		3*time.Hour + 5*time.Minute: "3h 05m",
+		time.Hour + 29*time.Second:  "1h 00m",
+	}
+
+	for d, want := range cases {
+		if got := roughDuration(d); got != want {
+			t.Errorf("roughDuration(%s) = %q, want %q", d, got, want)
+		}
+	}
+}
